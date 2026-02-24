@@ -2,7 +2,7 @@
 from tkinter import messagebox
 import pandas as pd
 import win32com.client as win32
-import os, time, tempfile
+import os, time, tempfile, shutil
 from datetime import datetime
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.table import Table, TableStyleInfo
@@ -71,7 +71,12 @@ def _cell_text(v) -> str:
     return str(v).strip()
 
 
-
+def _copiar_a_temp_corto(ruta: str) -> str:
+    tmp_dir = os.path.join(tempfile.gettempdir(), "app_correo_adjuntos")
+    os.makedirs(tmp_dir, exist_ok=True)
+    destino = os.path.join(tmp_dir, os.path.basename(ruta))
+    shutil.copy2(ruta, destino)
+    return destino
 
 def _adjunto_seguro(carpeta_base: str, nombre_archivo: str) -> str:
     if not nombre_archivo:
@@ -150,7 +155,16 @@ def _progress_set(progress, value: int):
     except Exception:
         pass
 
-
+def _asegurar_leible(path: str):
+    try:
+        with open(path, "rb") as f:
+            f.read(1)
+    except Exception as e:
+        raise FileNotFoundError(
+            f"No se pudo acceder al archivo (posible OneDrive solo-en-línea): {path}\n"
+            "Marca la carpeta/archivo como 'Mantener siempre en este dispositivo'."
+        ) from e
+        
 def enviar_correos(
     ruta_excel: str,
     carpeta_archivos: str,
@@ -188,7 +202,9 @@ def enviar_correos(
     if generar_pdf and not PDF_DISPONIBLE:
         raise RuntimeError("Para generar PDF necesitas reportlab: pip install reportlab")
 
+   
     # Leer la hoja seleccionada
+    _asegurar_leible(ruta_excel)
     df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
 
     if not col_nombre or not col_correo or not col_archivo:
@@ -232,7 +248,8 @@ def enviar_correos(
 
         registros = []
         cancelado = False
-
+        temp_adjuntos = []
+        
         for i, (_, fila) in enumerate(df.iterrows(), start=1):
             if callable(is_cancelled) and is_cancelled():
                 cancelado = True
@@ -273,7 +290,13 @@ def enviar_correos(
                 )
 
                 # Adjuntar archivo principal
-                mail.Attachments.Add(ruta_adj)
+            
+
+                _asegurar_leible(ruta_adj)
+
+                ruta_para_adjuntar = _copiar_a_temp_corto(ruta_adj)  # evita rutas largas/locks
+                temp_adjuntos.append(ruta_para_adjuntar)
+                mail.Attachments.Add(ruta_para_adjuntar)
 
                 # Footer con logo (si existe)
                 
@@ -302,7 +325,7 @@ def enviar_correos(
                     cancelado = True
                     break
 
-                mail.Display()
+                mail.Send()
                 time.sleep(delay_segundos)
 
             except Exception as e:
@@ -440,8 +463,15 @@ def enviar_correos(
         else:
             messagebox.showinfo("Proceso finalizado", "Envío terminado (sin generar informe).")
     finally:
+        # limpia logo temporal
         if logo_tmp_to_cleanup and os.path.isfile(logo_tmp_to_cleanup):
-            try:
-                os.remove(logo_tmp_to_cleanup)
-            except Exception:
-                pass
+            try: os.remove(logo_tmp_to_cleanup)
+            except Exception: pass
+
+        # limpia adjuntos temporales copiados
+        try:
+            for p in temp_adjuntos:
+                if p and os.path.isfile(p):
+                    os.remove(p)
+        except Exception:
+            pass
