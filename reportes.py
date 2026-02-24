@@ -1,11 +1,12 @@
 # reportes.py
 try:
-    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer, KeepInFrame, PageBreak
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.colors import black, lightgrey
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
     from reportlab.platypus import Image as RLImage
     from reportlab.lib.utils import ImageReader
+    from reportlab.lib.enums import TA_CENTER
     import os
     PDF_DISPONIBLE = True
 except Exception:
@@ -40,7 +41,11 @@ def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
     )
 
     styles = getSampleStyleSheet()
-    title_style = styles["Title"]
+    title_style = ParagraphStyle(
+        "title_center",
+        parent=styles["Title"],
+        alignment=TA_CENTER,
+    )
     section_style = styles["Heading2"]
 
     cell_style = ParagraphStyle(
@@ -95,25 +100,53 @@ def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
     LOGO_H_PX = 60
     LOGO_H_PT = LOGO_H_PX * 72 / 96  # 96dpi -> points
 
+    # --- Header: logo izquierda + título centrado (misma fila) ---
+    header_h = LOGO_H_PT  # altura del header según el logo
+    logo_flowable = Spacer(1, header_h)  # placeholder si no hay logo
+
     if logo_path and os.path.isfile(logo_path):
         w_pt, h_pt = _logo_size_keep_height_pt(logo_path, LOGO_H_PT)
-        elementos.append(RLImage(logo_path, width=w_pt, height=h_pt))
-        elementos.append(Spacer(1, 8))
-            
-    elementos.append(Paragraph("Registro de envío de correos", title_style))
+        logo_flowable = RLImage(logo_path, width=w_pt, height=h_pt)
+
+    titulo = Paragraph("Registro de envío de correos", title_style)
+
+    # Mantener el título dentro del ancho disponible y centrado
+    # (evita que se “desplace” raro si el título es largo)
+    titulo_box = KeepInFrame(doc.width, header_h, [titulo], hAlign="CENTER", vAlign="MIDDLE")
+
+    # Anchos: col logo = ancho real del logo (o un mínimo), col título = resto
+    logo_col_w = (w_pt if (logo_path and os.path.isfile(logo_path)) else header_h * 2.5)
+    logo_col_w = max(80, float(logo_col_w))  # mínimo razonable
+
+    header_tbl = Table(
+        [[logo_flowable, titulo_box]],
+        colWidths=[logo_col_w, doc.width - logo_col_w],
+        rowHeights=[header_h],
+    )
+    header_tbl.setStyle(TableStyle([
+        ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
+        ("ALIGN", (0, 0), (0, 0), "LEFT"),    # logo
+        ("ALIGN", (1, 0), (1, 0), "CENTER"),  # título
+        ("LEFTPADDING", (0, 0), (-1, -1), 0),
+        ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+        ("TOPPADDING", (0, 0), (-1, -1), 0),
+        ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+    ]))
+
+    elementos.append(header_tbl)
     elementos.append(Spacer(1, 10))
 
     elementos.append(Paragraph(f"Enviados ({len(enviados)})", section_style))
-    elementos.append(Spacer(1, 6))
+    elementos.append(Spacer(1, 4))
     if enviados:
         elementos.append(build_table(enviados))
     else:
         elementos.append(Paragraph("(sin registros)", styles["Normal"]))
 
-    elementos.append(Spacer(1, 14))
+    elementos.append(PageBreak()) #romper pagina
 
     elementos.append(Paragraph(f"Errores ({len(errores)})", section_style))
-    elementos.append(Spacer(1, 6))
+    elementos.append(Spacer(1, 4))
     if errores:
         elementos.append(build_table(errores))
     else:

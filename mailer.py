@@ -2,8 +2,7 @@
 from tkinter import messagebox
 import pandas as pd
 import win32com.client as win32
-import os
-import time
+import os, time, tempfile
 from datetime import datetime
 from openpyxl.drawing.image import Image as XLImage
 
@@ -31,7 +30,30 @@ def _logo_size_keep_height_px(path: str, target_h_px: int) -> tuple[int, int]:
         # fallback si no hay Pillow
         return (200, target_h_px)
     
-    
+def _prepare_logo_fixed_height(logo_path: str, target_h_px: int) -> str:
+    """
+    Crea una copia temporal del logo con altura fija (px) manteniendo proporción.
+    Retorna la ruta del archivo temporal (png).
+    Requiere Pillow; si no existe, devuelve el original.
+    """
+    try:
+        from PIL import Image
+    except Exception:
+        return logo_path  # fallback (no garantiza tamaño)
+
+    with Image.open(logo_path) as im:
+        im = im.convert("RGBA")
+        w0, h0 = im.size
+        if not w0 or not h0:
+            return logo_path
+        new_w = int(round(target_h_px * (w0 / h0)))
+        resized = im.resize((max(1, new_w), target_h_px), Image.LANCZOS)
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".png")
+    os.close(fd)
+    resized.save(tmp_path, format="PNG")
+    return tmp_path
+
 def _cell_text(v) -> str:
     """
     Convierte valores de Excel a texto:
@@ -185,159 +207,181 @@ def enviar_correos(
         if not ok:
             return
 
+
+    logo_for_use = None
+    logo_tmp_to_cleanup = None
+
     try:
-        outlook = win32.gencache.EnsureDispatch("Outlook.Application")
-    except Exception:
-        outlook = win32.Dispatch("Outlook.Application")
-
-    _progress_init(progress, total)
-
-    registros = []
-    cancelado = False
-
-    for i, (_, fila) in enumerate(df.iterrows(), start=1):
-        if callable(is_cancelled) and is_cancelled():
-            cancelado = True
-            break
-
-        nombre = _cell_text(fila[col_nombre])
-        correo = _cell_text(fila[col_correo]).lower()  # opcional: normalizar a minúsculas
-        nombre_archivo = _cell_text(fila[col_archivo])
-        
-        ahora = datetime.now()
-        fecha = ahora.strftime("%Y-%m-%d")
-        hora = ahora.strftime("%H:%M:%S")
-
-        estado = "Enviado"
+        if logo_path and os.path.isfile(logo_path):
+            fixed = _prepare_logo_fixed_height(os.path.abspath(logo_path), LOGO_H_PX)
+            logo_for_use = fixed
+            if os.path.abspath(fixed) != os.path.abspath(logo_path):
+                logo_tmp_to_cleanup = fixed
 
         try:
-            if not correo:
-                raise ValueError("Correo vacío.")
-            # Validación simple (rápida, sin regex)
-            if "@" not in correo or " " in correo:
-                raise ValueError(f"Correo inválido: {correo}")
+            outlook = win32.gencache.EnsureDispatch("Outlook.Application")
+        except Exception:
+            outlook = win32.Dispatch("Outlook.Application")
+
+        _progress_init(progress, total)
+
+        registros = []
+        cancelado = False
+
+        for i, (_, fila) in enumerate(df.iterrows(), start=1):
+            if callable(is_cancelled) and is_cancelled():
+                cancelado = True
+                break
+
+            nombre = _cell_text(fila[col_nombre])
+            correo = _cell_text(fila[col_correo]).lower()  # opcional: normalizar a minúsculas
+            nombre_archivo = _cell_text(fila[col_archivo])
             
-            if callable(is_cancelled) and is_cancelled():
-                cancelado = True
-                break
+            ahora = datetime.now()
+            fecha = ahora.strftime("%Y-%m-%d")
+            hora = ahora.strftime("%H:%M:%S")
 
-            ruta_adj = _adjunto_seguro(carpeta_archivos, nombre_archivo)
+            estado = "Enviado"
 
-            mail = outlook.CreateItem(0)
-            mail.To = correo
-            mail.Subject = asunto
-
-            # Texto -> HTML simple
-            body_txt = mensaje.replace("{nombre}", nombre)
-            body_html = (
-                "<html><body style='font-family:Segoe UI, Arial; font-size:11pt;'>"
-                + body_txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
-            )
-
-            # Adjuntar archivo principal
-            mail.Attachments.Add(ruta_adj)
-
-            # Footer con logo (si existe)
-            if logo_path and os.path.isfile(logo_path):
-                cid = "logo_footer"
-                att = mail.Attachments.Add(os.path.abspath(logo_path))
-
-                pa = att.PropertyAccessor
-                pa.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid)
-
-                body_html += (
-                    "<br><br>"
-                    f"<img src='cid:{cid}' style='height:{LOGO_H_PX}px; width:auto; display:block;'/>"
-                    "</body></html>"
-                )
-            else:
-                body_html += "</body></html>"
-
-            mail.HTMLBody = body_html
-
-            if callable(is_cancelled) and is_cancelled():
-                cancelado = True
-                break
-
-            mail.Display()
-            time.sleep(delay_segundos)
-
-        except Exception as e:
-            estado = f"Error: {str(e)}"
-
-        registros.append({
-            "Nombre": nombre,
-            "Correo": correo,
-            "NombreArchivo": nombre_archivo,
-            "Fecha": fecha,
-            "Hora": hora,
-            "Estado": estado,
-        })
-
-        if callable(on_progress):
             try:
-                on_progress(i, total, estado, nombre, correo)
+                if not correo:
+                    raise ValueError("Correo vacío.")
+                # Validación simple (rápida, sin regex)
+                if "@" not in correo or " " in correo:
+                    raise ValueError(f"Correo inválido: {correo}")
+                
+                if callable(is_cancelled) and is_cancelled():
+                    cancelado = True
+                    break
+
+                ruta_adj = _adjunto_seguro(carpeta_archivos, nombre_archivo)
+
+                mail = outlook.CreateItem(0)
+                mail.To = correo
+                mail.Subject = asunto
+
+                # Texto -> HTML simple
+                body_txt = mensaje.replace("{nombre}", nombre)
+                body_html = (
+                    "<html><body style='font-family:Segoe UI, Arial; font-size:11pt;'>"
+                    + body_txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+                )
+
+                # Adjuntar archivo principal
+                mail.Attachments.Add(ruta_adj)
+
+                # Footer con logo (si existe)
+                
+                
+                if logo_for_use and os.path.isfile(logo_for_use):
+                    cid = f"logo_footer_{i}"  # único por correo
+                    att = mail.Attachments.Add(os.path.abspath(logo_for_use))
+                    att.PropertyAccessor.SetProperty(
+                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
+                    )
+
+                    # Como ya lo redimensionaste, saca tamaño real del archivo preparado:
+                    w_px, h_px = _logo_size_keep_height_px(logo_for_use, LOGO_H_PX)
+
+                    body_html += (
+                        "<br><br>"
+                        f"<img src='cid:{cid}' height='{LOGO_H_PX}' style='width:auto;display:block;border:0;'/>"
+                        "</body></html>"
+                    )
+                else:
+                    body_html += "</body></html>"
+
+                mail.HTMLBody = body_html
+
+                if callable(is_cancelled) and is_cancelled():
+                    cancelado = True
+                    break
+
+                mail.Display()
+                time.sleep(delay_segundos)
+
+            except Exception as e:
+                estado = f"Error: {str(e)}"
+
+            registros.append({
+                "Nombre": nombre,
+                "Correo": correo,
+                "NombreArchivo": nombre_archivo,
+                "Fecha": fecha,
+                "Hora": hora,
+                "Estado": estado,
+            })
+
+            if callable(on_progress):
+                try:
+                    on_progress(i, total, estado, nombre, correo)
+                except Exception:
+                    pass
+                
+                
+            _progress_set(progress, i)
+            if root is not None:
+                root.update_idletasks()
+
+        # Guardar reporte con lo procesado hasta ahora
+        rutas_generadas = []
+        if (generar_excel or generar_pdf) and registros:
+            df_reg = pd.DataFrame(registros)
+
+            # Separación Enviados vs Errores (todo lo que NO sea "Enviado" se va a Errores)
+            mask_enviado = df_reg["Estado"].astype(str).str.strip().str.lower().eq("enviado")
+            df_enviados = df_reg[mask_enviado].copy()
+            df_errores = df_reg[~mask_enviado].copy()
+
+            if generar_excel:
+                ruta_excel_log = ruta_base_reporte.strip() + ".xlsx"
+                startrow = 5  # deja espacio arriba para el logo (ajustable)
+            
+                with pd.ExcelWriter(ruta_excel_log, engine="openpyxl") as writer:
+                    df_enviados.to_excel(writer, sheet_name="Enviados", index=False, startrow=startrow)
+                    df_errores.to_excel(writer, sheet_name="Errores", index=False, startrow=startrow)
+
+                    if logo_for_use and os.path.isfile(logo_for_use):
+                        wb = writer.book
+                        w_px, h_px = _logo_size_keep_height_px(os.path.abspath(logo_for_use), LOGO_H_PX)
+
+                        for sheet_name in ("Enviados", "Errores"):
+                            ws = wb[sheet_name]
+
+                            img = XLImage(os.path.abspath(logo_for_use))
+                            img.height = h_px
+                            img.width = w_px
+
+                            ws.add_image(img, "A1")
+                            ws.row_dimensions[1].height = 45  # opcional
+                            
+                rutas_generadas.append(ruta_excel_log)
+
+            if generar_pdf:
+                ruta_pdf_log = ruta_base_reporte.strip() + ".pdf"
+                # El PDF lo generamos con la lista original (reportes.py separa adentro)
+                generar_pdf_registro(registros, ruta_pdf_log, logo_path=logo_for_use)
+                rutas_generadas.append(ruta_pdf_log)
+
+        procesados = len(registros)
+            
+        if cancelado:
+            msg = f"Envío CANCELADO.\n\nProcesados: {procesados} de {total}."
+            if rutas_generadas:
+                msg += "\n\nInformes generados:\n" + "\n".join(rutas_generadas)
+            messagebox.showwarning("Cancelado", msg)
+            return
+
+        if rutas_generadas:
+            messagebox.showinfo(
+                "Proceso finalizado",
+                "Envío terminado.\n\nInformes generados:\n" + "\n".join(rutas_generadas)
+            )
+        else:
+            messagebox.showinfo("Proceso finalizado", "Envío terminado (sin generar informe).")
+    finally:
+        if logo_tmp_to_cleanup and os.path.isfile(logo_tmp_to_cleanup):
+            try:
+                os.remove(logo_tmp_to_cleanup)
             except Exception:
                 pass
-            
-            
-        _progress_set(progress, i)
-        if root is not None:
-            root.update_idletasks()
-
-    # Guardar reporte con lo procesado hasta ahora
-    rutas_generadas = []
-    if (generar_excel or generar_pdf) and registros:
-        df_reg = pd.DataFrame(registros)
-
-        # Separación Enviados vs Errores (todo lo que NO sea "Enviado" se va a Errores)
-        mask_enviado = df_reg["Estado"].astype(str).str.strip().str.lower().eq("enviado")
-        df_enviados = df_reg[mask_enviado].copy()
-        df_errores = df_reg[~mask_enviado].copy()
-
-        if generar_excel:
-            ruta_excel_log = ruta_base_reporte.strip() + ".xlsx"
-            startrow = 5  # deja espacio arriba para el logo (ajustable)
-        
-            with pd.ExcelWriter(ruta_excel_log, engine="openpyxl") as writer:
-                df_enviados.to_excel(writer, sheet_name="Enviados", index=False, startrow=startrow)
-                df_errores.to_excel(writer, sheet_name="Errores", index=False, startrow=startrow)
-
-                if logo_path and os.path.isfile(logo_path):
-                    wb = writer.book
-                    w_px, h_px = _logo_size_keep_height_px(os.path.abspath(logo_path), LOGO_H_PX)
-
-                    for sheet_name in ("Enviados", "Errores"):
-                        ws = wb[sheet_name]
-
-                        img = XLImage(os.path.abspath(logo_path))
-                        img.height = h_px
-                        img.width = w_px
-
-                        ws.add_image(img, "A1")
-                        ws.row_dimensions[1].height = 45  # opcional
-                        
-            rutas_generadas.append(ruta_excel_log)
-
-        if generar_pdf:
-            ruta_pdf_log = ruta_base_reporte.strip() + ".pdf"
-            # El PDF lo generamos con la lista original (reportes.py separa adentro)
-            generar_pdf_registro(registros, ruta_pdf_log, logo_path=logo_path)
-            rutas_generadas.append(ruta_pdf_log)
-
-    procesados = len(registros)
-
-    if cancelado:
-        msg = f"Envío CANCELADO.\n\nProcesados: {procesados} de {total}."
-        if rutas_generadas:
-            msg += "\n\nInformes generados:\n" + "\n".join(rutas_generadas)
-        messagebox.showwarning("Cancelado", msg)
-        return
-
-    if rutas_generadas:
-        messagebox.showinfo(
-            "Proceso finalizado",
-            "Envío terminado.\n\nInformes generados:\n" + "\n".join(rutas_generadas)
-        )
-    else:
-        messagebox.showinfo("Proceso finalizado", "Envío terminado (sin generar informe).")
