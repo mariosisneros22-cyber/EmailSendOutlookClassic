@@ -4,7 +4,7 @@ from tkinter import filedialog, messagebox, ttk
 from datetime import datetime
 import pandas as pd
 import customtkinter as ctk
-
+import os, shutil
 from mailer import enviar_correos
 
 PREVIEW_N = 5
@@ -14,6 +14,11 @@ preview_row = None
 # Espaciado consistente (simple)
 PADY_SM = 6
 PADY_MD = 10
+
+LOGOS_DIR = os.path.join(os.path.dirname(__file__), "logo")
+LOGO_NONE_LABEL = "Ninguno"
+logo_map = {}              # {"Nombre bonito": "ruta"}
+selected_logo_path = None  # ruta final a usar al enviar
 
 def seleccionar_excel():
     path = filedialog.askopenfilename(filetypes=[("Excel", "*.xlsx")])
@@ -147,6 +152,7 @@ def cargar_columnas_excel():
         messagebox.showerror("Error", f"No se pudo leer el Excel:\n{e}")
 
 
+
 # -------- VISTA PREVIA --------
 
 def _load_preview_df(n=PREVIEW_N):
@@ -211,7 +217,104 @@ def actualizar_vista_previa(event=None):
 
     actualizar_tabla_preview()
 
+def cargar_logos_predeterminados():
+    """
+    Carga logos desde ./logo (png/jpg/jpeg/gif).
+    Siempre incluye la opción 'Ninguno' como primera opción.
+    """
+    global logo_map
+    logo_map = {}
 
+    opciones = [LOGO_NONE_LABEL]
+
+    if os.path.isdir(LOGOS_DIR):
+        exts = (".png", ".jpg", ".jpeg", ".gif")
+        files = [f for f in os.listdir(LOGOS_DIR) if f.lower().endswith(exts)]
+        files.sort()
+
+        for f in files:
+            name = os.path.splitext(f)[0]
+            logo_map[name] = os.path.join(LOGOS_DIR, f)
+            opciones.append(name)
+
+    cb_logo["values"] = opciones
+
+    # Mantener selección si existe; si no, volver a Ninguno
+    actual = cb_logo.get().strip()
+    if actual in opciones:
+        cb_logo.set(actual)
+    else:
+        cb_logo.set(LOGO_NONE_LABEL)
+        
+def seleccionar_logo():
+    cargar_logos_predeterminados()
+    # opcional: feedback
+    # lbl_logo_estado.configure(text="Logos actualizados.")
+    
+def insertar_logo():
+    """
+    Permite elegir un archivo de imagen y lo copia a ./logo para que quede como predeterminado.
+    Luego refresca el combobox y lo deja seleccionado.
+    """
+    global selected_logo_path
+
+    file_path = filedialog.askopenfilename(
+        title="Seleccionar logo",
+        filetypes=[("Imágenes", "*.png;*.jpg;*.jpeg;*.gif")]
+    )
+    if not file_path:
+        return
+
+    # Crear carpeta si no existe
+    os.makedirs(LOGOS_DIR, exist_ok=True)
+
+    base = os.path.basename(file_path)
+    name, ext = os.path.splitext(base)
+
+    # Evitar sobreescribir: si existe, agrega sufijo _1, _2...
+    dest = os.path.join(LOGOS_DIR, base)
+    k = 1
+    while os.path.exists(dest):
+        dest = os.path.join(LOGOS_DIR, f"{name}_{k}{ext}")
+        k += 1
+
+    shutil.copy2(file_path, dest)
+
+    # Refrescar lista y seleccionar el nuevo
+    cargar_logos_predeterminados()
+    new_display_name = os.path.splitext(os.path.basename(dest))[0]
+    if new_display_name in logo_map:
+        cb_logo.set(new_display_name)
+        # aplicar selección inmediatamente
+        cb_logo.set(new_display_name)
+        aplicar_logo_seleccionado()
+    else:
+        cb_logo.set(LOGO_NONE_LABEL)
+        selected_logo_path = None
+        lbl_logo_estado.configure(text="Logo: (ninguno)")
+
+
+def aplicar_logo_seleccionado(event=None):
+    """
+    Aplica el logo elegido en el combobox como logo activo.
+    """
+    global selected_logo_path
+    name = cb_logo.get().strip()
+
+    if not name or name == LOGO_NONE_LABEL:
+        selected_logo_path = None
+        lbl_logo_estado.configure(text="Logo: (ninguno)")
+        return
+
+    if name not in logo_map:
+        selected_logo_path = None
+        lbl_logo_estado.configure(text="Logo: (ninguno)")
+        return
+
+    selected_logo_path = logo_map[name]
+    lbl_logo_estado.configure(text=f"Logo: {name}")
+    
+    
 def _set_ui_enviando(enviando: bool):
     state_inputs = "disabled" if enviando else "normal"
 
@@ -405,6 +508,7 @@ def abrir_modal_envio_y_ejecutar():
                 col_archivo=col_archivo,
                 hoja_excel=hoja_excel,    
                 header_idx=_get_header_index(),
+                logo_path=selected_logo_path,
                 on_progress=_on_progress,
             )
             status_lbl.configure(text="Proceso finalizado.")
@@ -590,6 +694,49 @@ carpeta_entry.pack(fill="x", pady=(0, PADY_MD))
 btn_carpeta = ctk.CTkButton(left_content, text="Seleccionar carpeta", command=seleccionar_carpeta, font=FONT_BUTTON)
 btn_carpeta.pack(fill="x", pady=(0, PADY_MD))
 
+
+
+# --- Logos (arriba de Asunto) ---
+frame_logo = ctk.CTkFrame(right_content, fg_color="transparent")
+frame_logo.pack(fill="x", pady=(0, PADY_MD))
+
+frame_logo.grid_columnconfigure(0, weight=0)  # "Logo"
+frame_logo.grid_columnconfigure(1, weight=1)  # combobox
+frame_logo.grid_columnconfigure(2, weight=0)  # Seleccionar logo
+frame_logo.grid_columnconfigure(3, weight=0)  # Insertar logo
+
+ctk.CTkLabel(frame_logo, text="Logo", font=FONT_LABEL).grid(
+    row=0, column=0, sticky="w", padx=(0, 12), pady=6
+)
+
+cb_logo = ttk.Combobox(frame_logo, state="readonly", style="Enabled.TCombobox")
+cb_logo.grid(row=0, column=1, sticky="ew", pady=6)
+
+btn_sel_logo = ctk.CTkButton(
+    frame_logo,
+    text="Actualizar lista",
+    command=seleccionar_logo,
+    font=FONT_BUTTON,
+    width=150
+)
+btn_sel_logo.grid(row=0, column=2, sticky="e", padx=(12, 0), pady=6)
+
+btn_ins_logo = ctk.CTkButton(
+    frame_logo,
+    text="Insertar logo",
+    command=insertar_logo,     # <-- IMPORTANTE: usar insertar_logo
+    font=FONT_BUTTON,
+    width=140
+)
+btn_ins_logo.grid(row=0, column=3, sticky="e", padx=(12, 0), pady=6)
+
+lbl_logo_estado = ctk.CTkLabel(right_content, text="Logo: (ninguno)")
+lbl_logo_estado.pack(anchor="w", pady=(0, PADY_MD))
+
+# aplicar selección al cambiar el combobox
+cb_logo.bind("<<ComboboxSelected>>", aplicar_logo_seleccionado)
+
+
 # Asunto
 ctk.CTkLabel(right_content, text="Asunto", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
 asunto_entry = ctk.CTkEntry(right_content)
@@ -664,6 +811,7 @@ cb_correo.bind("<<ComboboxSelected>>", actualizar_vista_previa)
 cb_archivo.bind("<<ComboboxSelected>>", actualizar_vista_previa)
 cb_hoja.bind("<<ComboboxSelected>>", lambda e: cargar_columnas_excel())
 
-
 _set_excel_controls_enabled(False)
+cargar_logos_predeterminados()
+aplicar_logo_seleccionado()
 root.mainloop()

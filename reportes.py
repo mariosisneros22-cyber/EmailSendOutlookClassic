@@ -4,12 +4,26 @@ try:
     from reportlab.lib.pagesizes import A4, landscape
     from reportlab.lib.colors import black, lightgrey
     from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+    from reportlab.platypus import Image as RLImage
+    from reportlab.lib.utils import ImageReader
+    import os
     PDF_DISPONIBLE = True
 except Exception:
     PDF_DISPONIBLE = False
 
+def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, float]:
+    """
+    Retorna (w_pt, h_pt) manteniendo proporción con altura fija target_h_pt.
+    """
+    ir = ImageReader(path)
+    w0, h0 = ir.getSize()
+    if not w0 or not h0:
+        return (target_h_pt * 3, target_h_pt)
+    w_pt = target_h_pt * (w0 / h0)
+    return (max(1.0, w_pt), target_h_pt)
 
-def generar_pdf_registro(registros, ruta_pdf):
+
+def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
     if not PDF_DISPONIBLE:
         raise RuntimeError("No está instalado reportlab. Instala con: pip install reportlab")
 
@@ -77,6 +91,15 @@ def generar_pdf_registro(registros, ruta_pdf):
         return t
 
     elementos = []
+    # Tamaño único (mismo que mailer.py)
+    LOGO_H_PX = 60
+    LOGO_H_PT = LOGO_H_PX * 72 / 96  # 96dpi -> points
+
+    if logo_path and os.path.isfile(logo_path):
+        w_pt, h_pt = _logo_size_keep_height_pt(logo_path, LOGO_H_PT)
+        elementos.append(RLImage(logo_path, width=w_pt, height=h_pt))
+        elementos.append(Spacer(1, 8))
+            
     elementos.append(Paragraph("Registro de envío de correos", title_style))
     elementos.append(Spacer(1, 10))
 

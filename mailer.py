@@ -5,10 +5,33 @@ import win32com.client as win32
 import os
 import time
 from datetime import datetime
+from openpyxl.drawing.image import Image as XLImage
 
 from reportes import PDF_DISPONIBLE, generar_pdf_registro
 
+# Tamaño único para TODOS (email/excel/pdf)
+LOGO_H_PX = 60
 
+# Para PDF: conversión px->points (asumiendo 96dpi)
+LOGO_H_PT = LOGO_H_PX * 72 / 96
+def _logo_size_keep_height_px(path: str, target_h_px: int) -> tuple[int, int]:
+    """
+    Retorna (w_px, h_px) manteniendo proporción con altura fija target_h_px.
+    Usa Pillow si está disponible; si no, cae a 200px de ancho por defecto.
+    """
+    try:
+        from PIL import Image
+        with Image.open(path) as im:
+            w0, h0 = im.size
+        if not w0 or not h0:
+            return (200, target_h_px)
+        w = int(round(target_h_px * (w0 / h0)))
+        return (max(1, w), target_h_px)
+    except Exception:
+        # fallback si no hay Pillow
+        return (200, target_h_px)
+    
+    
 def _cell_text(v) -> str:
     """
     Convierte valores de Excel a texto:
@@ -123,6 +146,7 @@ def enviar_correos(
     col_nombre: str | None = None,
     col_correo: str | None = None,
     col_archivo: str | None = None,
+    logo_path: str | None = None,   # <-- NUEVO
     on_progress=None,
 ):
     if not ruta_excel or not os.path.isfile(ruta_excel):
@@ -202,14 +226,40 @@ def enviar_correos(
             mail = outlook.CreateItem(0)
             mail.To = correo
             mail.Subject = asunto
-            mail.Body = mensaje.replace("{nombre}", nombre)
+
+            # Texto -> HTML simple
+            body_txt = mensaje.replace("{nombre}", nombre)
+            body_html = (
+                "<html><body style='font-family:Segoe UI, Arial; font-size:11pt;'>"
+                + body_txt.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;").replace("\n", "<br>")
+            )
+
+            # Adjuntar archivo principal
             mail.Attachments.Add(ruta_adj)
+
+            # Footer con logo (si existe)
+            if logo_path and os.path.isfile(logo_path):
+                cid = "logo_footer"
+                att = mail.Attachments.Add(os.path.abspath(logo_path))
+
+                pa = att.PropertyAccessor
+                pa.SetProperty("http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid)
+
+                body_html += (
+                    "<br><br>"
+                    f"<img src='cid:{cid}' style='height:{LOGO_H_PX}px; width:auto; display:block;'/>"
+                    "</body></html>"
+                )
+            else:
+                body_html += "</body></html>"
+
+            mail.HTMLBody = body_html
 
             if callable(is_cancelled) and is_cancelled():
                 cancelado = True
                 break
 
-            mail.Send()
+            mail.Display()
             time.sleep(delay_segundos)
 
         except Exception as e:
@@ -247,15 +297,32 @@ def enviar_correos(
 
         if generar_excel:
             ruta_excel_log = ruta_base_reporte.strip() + ".xlsx"
+            startrow = 5  # deja espacio arriba para el logo (ajustable)
+        
             with pd.ExcelWriter(ruta_excel_log, engine="openpyxl") as writer:
-                df_enviados.to_excel(writer, sheet_name="Enviados", index=False)
-                df_errores.to_excel(writer, sheet_name="Errores", index=False)
+                df_enviados.to_excel(writer, sheet_name="Enviados", index=False, startrow=startrow)
+                df_errores.to_excel(writer, sheet_name="Errores", index=False, startrow=startrow)
+
+                if logo_path and os.path.isfile(logo_path):
+                    wb = writer.book
+                    w_px, h_px = _logo_size_keep_height_px(os.path.abspath(logo_path), LOGO_H_PX)
+
+                    for sheet_name in ("Enviados", "Errores"):
+                        ws = wb[sheet_name]
+
+                        img = XLImage(os.path.abspath(logo_path))
+                        img.height = h_px
+                        img.width = w_px
+
+                        ws.add_image(img, "A1")
+                        ws.row_dimensions[1].height = 45  # opcional
+                        
             rutas_generadas.append(ruta_excel_log)
 
         if generar_pdf:
             ruta_pdf_log = ruta_base_reporte.strip() + ".pdf"
             # El PDF lo generamos con la lista original (reportes.py separa adentro)
-            generar_pdf_registro(registros, ruta_pdf_log)
+            generar_pdf_registro(registros, ruta_pdf_log, logo_path=logo_path)
             rutas_generadas.append(ruta_pdf_log)
 
     procesados = len(registros)
