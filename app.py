@@ -509,6 +509,7 @@ def abrir_modal_envio_y_ejecutar():
                 hoja_excel=hoja_excel,    
                 header_idx=_get_header_index(),
                 logo_path=selected_logo_path,
+                report_title=titulo_reporte_entry.get().strip(),
                 on_progress=_on_progress,
             )
             status_lbl.configure(text="Proceso finalizado.")
@@ -793,6 +794,13 @@ btn_reporte = ctk.CTkButton(right_content, text="Elegir dónde guardar informe",
 btn_reporte.pack(fill="x", pady=(0, PADY_MD))
 
 _toggle_reporte_ui()
+
+
+# --- Título del reporte (antes de ENVIAR) ---
+ctk.CTkLabel(right_content, text="Título del reporte", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+titulo_reporte_entry = ctk.CTkEntry(right_content)
+titulo_reporte_entry.insert(0, "Registro de envío de correos")  # default
+titulo_reporte_entry.pack(fill="x", pady=(0, PADY_MD))
 
 # Botones
 btn_enviar = ctk.CTkButton(

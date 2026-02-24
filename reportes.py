@@ -24,7 +24,7 @@ def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, flo
     return (max(1.0, w_pt), target_h_pt)
 
 
-def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
+def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None, report_title: str = "Registro de envío de correos"):
     if not PDF_DISPONIBLE:
         raise RuntimeError("No está instalado reportlab. Instala con: pip install reportlab")
 
@@ -62,12 +62,13 @@ def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
         s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         return Paragraph(s, cell_style)
 
-    headers = ["Nombre", "Correo", "Fecha", "Hora", "Estado"]
+    headers = ["N°","Nombre", "Correo", "Fecha", "Hora", "Estado"]
 
     def build_table(rows):
         data = [headers]
-        for r in rows:
+        for idx, r in enumerate(rows, start=1):
             data.append([
+                P(idx),
                 P(r.get("Nombre", "")),
                 P(r.get("Correo", "")),
                 P(r.get("Fecha", "")),
@@ -77,6 +78,7 @@ def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
 
         available_width = doc.width
         col_widths = [
+            available_width * 0.06,  # N°
             available_width * 0.14,  # Nombre
             available_width * 0.20,  # Correo
             available_width * 0.10,  # Fecha
@@ -108,7 +110,8 @@ def generar_pdf_registro(registros, ruta_pdf, logo_path: str | None = None):
         w_pt, h_pt = _logo_size_keep_height_pt(logo_path, LOGO_H_PT)
         logo_flowable = RLImage(logo_path, width=w_pt, height=h_pt)
 
-    titulo = Paragraph("Registro de envío de correos", title_style)
+    titulo_txt = (report_title or "").strip() or "Registro de envío de correos"
+    titulo = Paragraph(titulo_txt, title_style)
 
     # Mantener el título dentro del ancho disponible y centrado
     # (evita que se “desplace” raro si el título es largo)

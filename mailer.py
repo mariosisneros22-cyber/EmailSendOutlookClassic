@@ -5,6 +5,8 @@ import win32com.client as win32
 import os, time, tempfile
 from datetime import datetime
 from openpyxl.drawing.image import Image as XLImage
+from openpyxl.worksheet.table import Table, TableStyleInfo
+from openpyxl.styles import Alignment, Font
 
 from reportes import PDF_DISPONIBLE, generar_pdf_registro
 
@@ -67,6 +69,8 @@ def _cell_text(v) -> str:
     except Exception:
         pass
     return str(v).strip()
+
+
 
 
 def _adjunto_seguro(carpeta_base: str, nombre_archivo: str) -> str:
@@ -169,6 +173,7 @@ def enviar_correos(
     col_correo: str | None = None,
     col_archivo: str | None = None,
     logo_path: str | None = None,   # <-- NUEVO
+    report_title: str = "Registro de envío de correos", 
     on_progress=None,
 ):
     if not ruta_excel or not os.path.isfile(ruta_excel):
@@ -332,35 +337,90 @@ def enviar_correos(
             mask_enviado = df_reg["Estado"].astype(str).str.strip().str.lower().eq("enviado")
             df_enviados = df_reg[mask_enviado].copy()
             df_errores = df_reg[~mask_enviado].copy()
+            
+            for df_tmp in (df_enviados, df_errores):
+                if "NombreArchivo" in df_tmp.columns:
+                    df_tmp.drop(columns=["NombreArchivo"], inplace=True)
 
+                df_tmp.insert(0, "N°", range(1, len(df_tmp) + 1))
+                
             if generar_excel:
                 ruta_excel_log = ruta_base_reporte.strip() + ".xlsx"
-                startrow = 5  # deja espacio arriba para el logo (ajustable)
-            
+                titulo_txt = (report_title or "").strip() or "Registro de envío de correos"
+
+                startrow = 3  # tabla comienza en fila 4 (recomendado)
+
                 with pd.ExcelWriter(ruta_excel_log, engine="openpyxl") as writer:
                     df_enviados.to_excel(writer, sheet_name="Enviados", index=False, startrow=startrow)
                     df_errores.to_excel(writer, sheet_name="Errores", index=False, startrow=startrow)
+                    header_row = startrow + 1          # fila donde Excel escribe los headers del DF
+                    start_col = 1                      # A
 
-                    if logo_for_use and os.path.isfile(logo_for_use):
-                        wb = writer.book
-                        w_px, h_px = _logo_size_keep_height_px(os.path.abspath(logo_for_use), LOGO_H_PX)
+                    def _add_excel_table(ws, df, table_name: str):
+                        if df is None or df.empty:
+                            return
 
-                        for sheet_name in ("Enviados", "Errores"):
-                            ws = wb[sheet_name]
+                        nrows = len(df)
+                        ncols = len(df.columns)
 
+                        end_row = header_row + nrows           # header + data
+                        end_col = start_col + ncols - 1        # A + ncols - 1
+
+                        # Convertir número de columna a letra (A, B, C...)
+                        from openpyxl.utils import get_column_letter
+                        end_col_letter = get_column_letter(end_col)
+
+                        table_ref = f"A{header_row}:{end_col_letter}{end_row}"
+
+                        tab = Table(displayName=table_name, ref=table_ref)
+
+                        style = TableStyleInfo(
+                            name="TableStyleMedium9",
+                            showFirstColumn=False,
+                            showLastColumn=False,
+                            showRowStripes=True,
+                            showColumnStripes=False
+                        )
+                        tab.tableStyleInfo = style
+                        ws.add_table(tab)
+                    
+                    wb = writer.book
+
+                    ws_env = wb["Enviados"]
+                    ws_err = wb["Errores"]
+
+                    _add_excel_table(ws_env, df_enviados, "TablaEnviados")
+                    _add_excel_table(ws_err, df_errores, "TablaErrores")
+
+                    for sheet_name, df_sheet in (("Enviados", df_enviados), ("Errores", df_errores)):
+                        ws = wb[sheet_name]
+
+                        # --- rango dinámico para centrar título ---
+                        ncols = max(1, len(df_sheet.columns))
+                        start_col = 4  # B (A queda para el logo)
+                        end_col = start_col + ncols - 1  # hasta donde llegue la tabla
+
+                        ws.merge_cells(start_row=1, start_column=start_col, end_row=1, end_column=end_col)
+                        cell = ws.cell(row=1, column=start_col)
+                        cell.value = titulo_txt
+                        cell.alignment = Alignment(horizontal="center", vertical="center")
+                        cell.font = Font(bold=True, size=14)
+
+                        ws.row_dimensions[1].height = 45
+
+                        # --- logo en A1 ---
+                        if logo_for_use and os.path.isfile(logo_for_use):
+                            w_px, h_px = _logo_size_keep_height_px(os.path.abspath(logo_for_use), LOGO_H_PX)
                             img = XLImage(os.path.abspath(logo_for_use))
                             img.height = h_px
                             img.width = w_px
-
                             ws.add_image(img, "A1")
-                            ws.row_dimensions[1].height = 45  # opcional
-                            
-                rutas_generadas.append(ruta_excel_log)
 
+                rutas_generadas.append(ruta_excel_log)
             if generar_pdf:
                 ruta_pdf_log = ruta_base_reporte.strip() + ".pdf"
                 # El PDF lo generamos con la lista original (reportes.py separa adentro)
-                generar_pdf_registro(registros, ruta_pdf_log, logo_path=logo_for_use)
+                generar_pdf_registro(registros, ruta_pdf_log, logo_path=logo_for_use, report_title=report_title)
                 rutas_generadas.append(ruta_pdf_log)
 
         procesados = len(registros)
