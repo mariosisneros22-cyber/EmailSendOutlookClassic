@@ -9,6 +9,21 @@ from datetime import datetime
 from reportes import PDF_DISPONIBLE, generar_pdf_registro
 
 
+def _cell_text(v) -> str:
+    """
+    Convierte valores de Excel a texto:
+    - NaN/None => ""
+    - strings => strip()
+    - otros => str(...).strip()
+    """
+    try:
+        if pd.isna(v):
+            return ""
+    except Exception:
+        pass
+    return str(v).strip()
+
+
 def _adjunto_seguro(carpeta_base: str, nombre_archivo: str) -> str:
     if not nombre_archivo:
         raise ValueError("NombreArchivo vacío.")
@@ -101,8 +116,9 @@ def enviar_correos(
     delay_segundos: float = 1.5,
     pedir_confirmacion: bool = True,
     is_cancelled=None,
-    # NUEVO: hoja del Excel (nombre o índice)
+    # NUEVO: hoja del Excel y header
     hoja_excel=0,
+    header_idx: int = 0,
     # columnas elegidas
     col_nombre: str | None = None,
     col_correo: str | None = None,
@@ -122,7 +138,7 @@ def enviar_correos(
         raise RuntimeError("Para generar PDF necesitas reportlab: pip install reportlab")
 
     # Leer la hoja seleccionada
-    df = pd.read_excel(ruta_excel, sheet_name=hoja_excel)
+    df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
 
     if not col_nombre or not col_correo or not col_archivo:
         raise ValueError("Selecciona las columnas de Nombre/Correo/NombreArchivo antes de enviar.")
@@ -145,7 +161,10 @@ def enviar_correos(
         if not ok:
             return
 
-    outlook = win32.Dispatch("Outlook.Application")
+    try:
+        outlook = win32.gencache.EnsureDispatch("Outlook.Application")
+    except Exception:
+        outlook = win32.Dispatch("Outlook.Application")
 
     _progress_init(progress, total)
 
@@ -157,10 +176,10 @@ def enviar_correos(
             cancelado = True
             break
 
-        nombre = str(fila[col_nombre]).strip()
-        correo = str(fila[col_correo]).strip()
-        nombre_archivo = str(fila[col_archivo]).strip()
-
+        nombre = _cell_text(fila[col_nombre])
+        correo = _cell_text(fila[col_correo]).lower()  # opcional: normalizar a minúsculas
+        nombre_archivo = _cell_text(fila[col_archivo])
+        
         ahora = datetime.now()
         fecha = ahora.strftime("%Y-%m-%d")
         hora = ahora.strftime("%H:%M:%S")
@@ -170,7 +189,10 @@ def enviar_correos(
         try:
             if not correo:
                 raise ValueError("Correo vacío.")
-
+            # Validación simple (rápida, sin regex)
+            if "@" not in correo or " " in correo:
+                raise ValueError(f"Correo inválido: {correo}")
+            
             if callable(is_cancelled) and is_cancelled():
                 cancelado = True
                 break

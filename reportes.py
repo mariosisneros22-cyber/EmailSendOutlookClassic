@@ -43,7 +43,7 @@ def generar_pdf_registro(registros, ruta_pdf):
         s = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
         return Paragraph(s, cell_style)
 
-    headers = ["Nombre", "Correo", "NombreArchivo", "Fecha", "Hora", "Estado"]
+    headers = ["Nombre", "Correo", "Fecha", "Hora", "Estado"]
 
     def build_table(rows):
         data = [headers]
@@ -51,7 +51,6 @@ def generar_pdf_registro(registros, ruta_pdf):
             data.append([
                 P(r.get("Nombre", "")),
                 P(r.get("Correo", "")),
-                P(r.get("NombreArchivo", "")),
                 P(r.get("Fecha", "")),
                 P(r.get("Hora", "")),
                 P(r.get("Estado", "")),
@@ -61,7 +60,6 @@ def generar_pdf_registro(registros, ruta_pdf):
         col_widths = [
             available_width * 0.14,  # Nombre
             available_width * 0.20,  # Correo
-            available_width * 0.26,  # NombreArchivo
             available_width * 0.10,  # Fecha
             available_width * 0.08,  # Hora
             available_width * 0.22,  # Estado
