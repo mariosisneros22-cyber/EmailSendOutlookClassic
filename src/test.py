@@ -13,7 +13,7 @@ CARPETA_PDFS = r"C:\Users\Usuario\OneDrive - CLOUD PERU\Escritorio\Carpeta de Ar
 
 # 4) Ejecuta SOLO 1 (modo seguro)
 n = process_pending_responses(
-    carpeta_archivos=testeo,
+    carpeta_archivos=CARPETA_PDFS,
     html_body="Hola,<br><br>Adjunto documento.<br><br>Saludos.",
     delay_segundos=1.0,
     only_first_n=1,

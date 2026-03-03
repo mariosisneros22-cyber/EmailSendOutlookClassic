@@ -7,7 +7,7 @@ CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "dat
 def save_selected_folder(store_id: str, entry_id: str):
     os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
     data = {"queue_folder_store_id": store_id, "queue_folder_entry_id": entry_id}
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:   # <- FIX
+    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
         json.dump(data, f, indent=2)
 
 def load_selected_folder_ids():

@@ -1,32 +1,45 @@
-import os, datetime
+import os
+from datetime import datetime
 import pandas as pd
 
 from core.outlook_folders import get_saved_outlook_folder, get_or_create_subfolder
-from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail,safe_join_file
+from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail
+from core.common import safe_join_file
 
 CONTROL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__),"..","data", "responder_control.xlsx"))
 
 
 MAILITEM_CLASS=43
 
-def fetch_last_messages_by_conversation():
+def fetch_last_messages_by_conversation(logger=None):
     folder = get_saved_outlook_folder()
     if folder is None:
         raise RuntimeError("No hay carpeta seleccionada.")
+    
+    if callable(logger):
+        try:
+            logger(f"Carpeta seleccionada: {getattr(folder, 'Name','(sin nombre)')}")
+        except Exception:
+            logger("Carpeta seleccionada: (no se pudo leer Name)")
+            
 
     items = folder.Items
-    # Ordenar (muy importante) para que el primero que veamos de cada conversación sea el más reciente
     items.Sort("[ReceivedTime]", True)
 
+    total_items = items.Count  # ← Outlook ya sabe cuántos hay
+    mail_items = 0
     seen_conv = set()
     results = []
-
+    
     # iterar ya ordenado desc
     for item in items:
         try:
             if item.Class != MAILITEM_CLASS:
                 continue
+            
+            mail_items += 1
             conv = str(item.ConversationID or "").strip()
+            
             if not conv or conv in seen_conv:
                 continue
 
@@ -39,7 +52,8 @@ def fetch_last_messages_by_conversation():
             })
         except Exception:
             continue
-
+    if callable(logger):
+        logger(f"Items={total_items} | MailItem={mail_items} | Conversaciones únicas={len(results)}")
     return results
 
 def ensure_control_file():
@@ -91,7 +105,7 @@ def update_control_from_outlook():
 
 
 
-def process_pending_responses(carpeta_archivos: str, html_body: str | None = None, delay_segundos: float = 1.0, only_first_n: int | None = None):
+def process_pending_responses(carpeta_archivos: str, html_body: str | None = None, delay_segundos: float = 1.0, only_first_n: int | None = None, logger=None):
     """
     Lee CONTROL_PATH y procesa filas con estado Pendiente y nombre_archivo no vacío.
     """
@@ -105,11 +119,15 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
     folder = get_saved_outlook_folder()
     if folder is None:
         raise RuntimeError("No hay carpeta seleccionada.")
+    
     folder_done = get_or_create_subfolder(folder,"Procesados")
     
     pendientes = df[df["estado"].astype(str).str.strip().str.lower().eq("pendiente")].copy()
     if only_first_n is not None:
         pendientes = pendientes.head(int(only_first_n))
+        
+    if callable(logger):
+        logger(f"Pendientes detectados: {len(pendientes)}")
         
     procesados = 0
     
@@ -117,7 +135,15 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
         conv_id = str (df.at[idx, "conversation_id"]).strip()
         nombre_archivo = str(df.at[idx, "nombre_archivo"]).strip()
         
+        if callable(logger):
+            logger(f"Procesando conv={conv_id[:8]}... archivo= '{nombre_archivo}'")
+            
         if not conv_id:
+            df.at[idx, "estado"] = "Error"
+            df.at[idx, "error"] = "conversation_id vacío"
+            continue
+
+        if not nombre_archivo:
             df.at[idx, "estado"] = "Error"
             df.at[idx, "error"] = "nombre_archivo vacío"
             continue
@@ -148,4 +174,8 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
             df.at[idx,"error"] = str(e)
     
     df.to_excel(CONTROL_PATH, index=False)
+    
+    if callable(logger):
+        logger(f"Procesados OK: {procesados}")
+        
     return procesados
