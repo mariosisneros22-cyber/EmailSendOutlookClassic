@@ -1,12 +1,11 @@
-#ui/responder_tab.py
-
+# ui/responder_tab.py
 import os
-import customtkinter as ctk
-from tkinter import messagebox, filedialog
 from datetime import datetime
+from tkinter import filedialog, messagebox
+
+import customtkinter as ctk
 
 from core.app_settings import get_attachments_folder, set_attachments_folder
-
 from core.outlook_folders import pick_outlook_folder_and_save, get_saved_outlook_folder
 from core.responder_queue import (
     update_control_from_outlook,
@@ -16,67 +15,213 @@ from core.responder_queue import (
     CONTROL_PATH,
 )
 
-PADY_SM = 6
-PADY_MD = 10
- 
-FONT_LABEL = ("segoe UI", 13, "bold")
-FONT_BUTTON = ("segoe UI", 13, "bold")
+# -----------------------
+# UI tokens (locales)
+# -----------------------
+PAD_OUTER = 10
+PAD_INNER = 14
+GAP_SM = 6
+GAP_MD = 10
 
+# Tipografía: más legible (usuarios)
+FONT_TITLE = ("Segoe UI", 18, "bold")
+FONT_SECTION = ("Segoe UI", 14, "bold")
+FONT_BODY = ("Segoe UI", 13)
+
+FONT_BTN_PRIMARY = ("Segoe UI", 13, "bold")
+FONT_BTN = ("Segoe UI", 12)
+FONT_BTN_TOOL = ("Segoe UI", 11)
+
+H_PRIMARY = 46
+H_SECONDARY = 36
+H_TOOL = 30
+
+
+# -----------------------
+# Styles (colores por jerarquía)
+# Nota: tu app usa appearance_mode="System".
+# Estos colores son tuples (light, dark) para mantener contraste.
+# -----------------------
+BTN_PRIMARY = dict(
+    fg_color=("#2563eb", "#2563eb"),
+    hover_color=("#1d4ed8", "#1d4ed8"),
+    text_color="white",
+)
+
+BTN_SECONDARY = dict(
+    fg_color=("#e5e7eb", "#2a2a2a"),
+    hover_color=("#d1d5db", "#3a3a3a"),
+    text_color=("#111111", "#eaeaea"),
+)
+
+BTN_TOOL = dict(
+    fg_color="transparent",
+    hover_color=("#f3f4f6", "#2b2b2b"),
+    border_width=1,
+    border_color=("#cfcfcf", "#3a3a3a"),
+    text_color=("#111111", "#eaeaea"),
+)
+
+LABEL_COLOR = dict(
+    text_color=("#111111", "#eaeaea")
+)
+
+
+# -----------------------
+# Helpers
+# -----------------------
 def _open_file(path: str):
     path = os.path.abspath(path)
     if not os.path.exists(path):
         raise FileNotFoundError(path)
-    
-    
-    #Windows: abre con app por defecto
-    os.startfile(path) # noqa: S606
-    
+    os.startfile(path)  # noqa: S606
+
 
 def _safe_folder_name(folder):
     try:
         return str(folder.Name)
     except Exception:
-        return  "(carpeta seleccionada)"
-    
+        return "(carpeta seleccionada)"
+
+
+def _now_ts() -> str:
+    return datetime.now().strftime("%H:%M:%S")
+
+
+def _section(parent, title: str) -> ctk.CTkFrame:
+    """
+    Card con borde + fondo para diferenciar secciones incluso en dark mode.
+    Devuelve el body donde se colocan controles.
+    """
+    card = ctk.CTkFrame(
+        parent,
+        corner_radius=12,
+        border_width=1,
+        border_color=("#d0d0d0", "#3a3a3a"),
+        fg_color=("#ffffff", "#1f1f1f"),
+    )
+    card.pack(fill="x", pady=(0, GAP_MD))
+
+    header = ctk.CTkFrame(card, fg_color="transparent")
+    header.pack(fill="x", padx=PAD_INNER, pady=(PAD_INNER, 6))
+
+    ctk.CTkLabel(header, text=title, font=FONT_SECTION, **LABEL_COLOR).pack(anchor="w")
+
+    body = ctk.CTkFrame(card, fg_color="transparent")
+    body.pack(fill="x", padx=PAD_INNER, pady=(0, PAD_INNER))
+    return body
+
+
+# -----------------------
+# Main mount
+# -----------------------
 def mount(parent):
     """
     Tab: RESPONDER (cola / control)
     - Elegir carpeta Outlook
-    - Mostrar estado carpeta guardada
+    - Elegir carpeta adjuntos
     - Actualizar cola -> control.xlsx
-    - Abrir control.xlsx
+    - Generar sugeridos / aplicar sugerido
+    - Procesar pendientes (ReplyAll + adjunto)
+    - Log opcional (colapsable)
     """
     root = parent.winfo_toplevel()
 
-    frame = ctk.CTkFrame(parent)
-    frame.pack(fill="both", expand=True, padx=10, pady=10)
+    frame = ctk.CTkFrame(parent, fg_color="transparent")
+    frame.pack(fill="both", expand=True, padx=PAD_OUTER, pady=PAD_OUTER)
 
     # ---------- Header ----------
-    ctk.CTkLabel(frame, text="Responder (cola masiva)", font=("Segoe UI", 16, "bold")).pack(
-        anchor="w", pady=(0, PADY_MD)
-    )
+    header = ctk.CTkFrame(frame, fg_color="transparent")
+    header.pack(fill="x", pady=(0, GAP_MD))
 
+    ctk.CTkLabel(header, text="Responder (cola masiva)", font=FONT_TITLE, **LABEL_COLOR).pack(anchor="w")
+
+    # Estado (variables)
     status_var = ctk.StringVar(value="Carpeta Outlook: (no seleccionada)")
-    lbl_status = ctk.CTkLabel(frame, textvariable=status_var)
-    lbl_status.pack(anchor="w", pady=(0, PADY_MD))
-    
-    attachments_var = ctk.StringVar(value="Carpeta adjutos: (no seleccionada)")
-    ctk.CTkLabel(frame, textvariable=attachments_var).pack(anchor="w",pady=(0, PADY_MD))
-    
-    # ---------- Log ------------
-    log_box = ctk.CTkTextbox(frame, height=140)
-    log_box.pack(fill="x", padx=10, pady=(0,10))
+    attachments_var = ctk.StringVar(value="Carpeta adjuntos: (no seleccionada)")
+    ui_status_var = ctk.StringVar(value="Estado: Listo")
 
-    # ---------- Acciones ----------
-    actions = ctk.CTkFrame(frame, fg_color="transparent")
-    actions.pack(fill="x", pady=(0, PADY_MD))
+    # -----------------------
+    # Log (colapsable)
+    # -----------------------
+    log_visible = ctk.BooleanVar(value=False)
 
-    actions.grid_columnconfigure(0, weight=1)
-    actions.grid_columnconfigure(1, weight=1)
-    actions.grid_columnconfigure(2, weight=1)
-    actions.grid_columnconfigure(3, weight=1)
+    log_card = ctk.CTkFrame(
+        frame,
+        corner_radius=12,
+        border_width=1,
+        border_color=("#d0d0d0", "#3a3a3a"),
+        fg_color=("#ffffff", "#1f1f1f"),
+    )
+    log_hdr = ctk.CTkFrame(log_card, fg_color="transparent")
+    log_body = ctk.CTkFrame(log_card, fg_color="transparent")
+    log_box = ctk.CTkTextbox(log_body, height=180)
 
+    def _log_clear():
+        try:
+            log_box.delete("1.0", "end")
+        except Exception:
+            pass
+
+    def _log_show():
+        if log_visible.get():
+            return
+        log_visible.set(True)
+        log_card.pack(fill="both", expand=True, pady=(0, 0))
+        log_hdr.pack(fill="x", padx=PAD_INNER, pady=(PAD_INNER, 6))
+        log_body.pack(fill="both", expand=True, padx=PAD_INNER, pady=(0, PAD_INNER))
+        log_box.pack(fill="both", expand=True)
+
+    def _log_hide():
+        if not log_visible.get():
+            return
+        log_visible.set(False)
+        try:
+            log_card.pack_forget()
+        except Exception:
+            pass
+
+    def _log_toggle():
+        if log_visible.get():
+            _log_hide()
+        else:
+            _log_show()
+
+    def log(msg: str):
+        """
+        Logger usado por procesos largos.
+        - Si el log está oculto, solo lo abre automáticamente en errores.
+        """
+        try:
+            s = str(msg).strip()
+            is_error = s.lower().startswith("error") or s.lower().startswith("exception")
+            if is_error:
+                _log_show()
+
+            log_box.insert("end", f"[{_now_ts()}] {s}\n")
+            log_box.see("end")
+            log_box.update_idletasks()
+        except Exception:
+            pass
+
+    # Header del log (con botones pequeños)
+    ctk.CTkLabel(log_hdr, text="Log (detalle)", font=FONT_SECTION, **LABEL_COLOR).pack(side="left")
+
+    btn_hide = ctk.CTkButton(
+        log_hdr, text="Ocultar", width=90, height=H_TOOL, font=FONT_BTN_TOOL, command=_log_hide, **BTN_TOOL
+    )
+    btn_hide.pack(side="right", padx=(GAP_SM, 0))
+
+    btn_clear = ctk.CTkButton(
+        log_hdr, text="Limpiar", width=90, height=H_TOOL, font=FONT_BTN_TOOL, command=_log_clear, **BTN_TOOL
+    )
+    btn_clear.pack(side="right", padx=(GAP_SM, 0))
+
+    # -----------------------
+    # State refresh
+    # -----------------------
     def refresh_status():
+        # Outlook folder
         try:
             folder = get_saved_outlook_folder()
             if folder is None:
@@ -85,21 +230,46 @@ def mount(parent):
                 status_var.set(f"Carpeta Outlook: {_safe_folder_name(folder)}")
         except Exception:
             status_var.set("Carpeta Outlook: (error al leer configuración)")
-            
+
+        # Attachments folder
         try:
             p = get_attachments_folder()
             attachments_var.set(f"Carpeta adjuntos: {p}" if p else "Carpeta adjuntos: (no seleccionada)")
         except Exception:
-            attachments_var.set("Carpeta adjuntos: (error al leer la configuracion)")
+            attachments_var.set("Carpeta adjuntos: (error al leer la configuración)")
 
+    # -----------------------
+    # Actions (callbacks)
+    # -----------------------
     def on_pick_folder():
         try:
+            ui_status_var.set("Estado: Seleccionando carpeta Outlook…")
             folder = pick_outlook_folder_and_save()
             if folder is None:
+                ui_status_var.set("Estado: Listo")
                 return
             refresh_status()
+            ui_status_var.set("Estado: Carpeta Outlook guardada")
             messagebox.showinfo("Listo", "Carpeta guardada. Ya puedes actualizar la cola.")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
+            log(f"ERROR: {e}")
+            messagebox.showerror("Error", str(e))
+
+    def on_pick_attachments_folder():
+        try:
+            ui_status_var.set("Estado: Seleccionando carpeta de adjuntos…")
+            path = filedialog.askdirectory(title="Selecciona la carpeta de adjuntos (PDF/archivos)")
+            if not path:
+                ui_status_var.set("Estado: Listo")
+                return
+            set_attachments_folder(path)
+            refresh_status()
+            ui_status_var.set("Estado: Carpeta de adjuntos guardada")
+            messagebox.showinfo("Listo", "Carpeta de adjuntos guardada.")
+        except Exception as e:
+            ui_status_var.set("Estado: Error")
+            log(f"ERROR: {e}")
             messagebox.showerror("Error", str(e))
 
     def on_update_queue():
@@ -110,137 +280,186 @@ def mount(parent):
                 messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
                 return
 
-            log("Actualizando cola desde Outlook...")
+            ui_status_var.set("Estado: Actualizando cola…")
+            log("Actualizando cola desde Outlook…")
             root.update_idletasks()
 
-            n = update_control_from_outlook()  # aquí puede demorar
+            n = update_control_from_outlook()  # puede demorar
 
             log(f"Listo. Se agregaron {n} conversaciones nuevas.")
+            ui_status_var.set(f"Estado: Cola actualizada (+{n})")
             messagebox.showinfo("Actualización completada", f"Se agregaron {n} conversaciones nuevas.\n\n{CONTROL_PATH}")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
             log(f"ERROR: {e}")
             messagebox.showerror("Error", str(e))
 
     def on_open_control():
         try:
+            ui_status_var.set("Estado: Abriendo control.xlsx…")
             _open_file(CONTROL_PATH)
+            ui_status_var.set("Estado: Listo")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
+            log(f"ERROR: {e}")
             messagebox.showerror("Error", str(e))
-    
-    def log(msg:str):
-        try:
-            ts= datetime.now().strftime("%H:%M:%S")
-            log_box.insert("end", f"[{ts}] {msg}\n")
-            log_box.see("end")
-            log_box.update_idletasks()
-        except Exception:
-            pass
-        
-    
-    def on_pick_attachments_folder():
-        try: 
-            path = filedialog.askdirectory(title="Selecciona la carpeta de adjuntos (PDF/archivos)")
-            if not path:
-                return
-            set_attachments_folder(path)
-            refresh_status()
-            messagebox.showinfo("Listo", "Carpeta de adjuntos guardada.")
-        except Exception as e:
-            messagebox.showerror("Error", str(e))
-            
+
     def on_fill_suggested():
         try:
-            log("Generando nombre_sugerido desde subject...")
+            ui_status_var.set("Estado: Generando sugeridos…")
+            log("Generando nombre_sugerido desde subject…")
             n = fill_suggested_names(year_mode="current", only_if_empty=True)
             log(f"Listo. Se generaron/actualizaron {n} sugeridos.")
+            ui_status_var.set(f"Estado: Sugeridos listos ({n})")
             messagebox.showinfo("Listo", f"Sugeridos generados: {n}\n\n{CONTROL_PATH}")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
             log(f"ERROR sugeridos: {e}")
             messagebox.showerror("Error", str(e))
-            
+
     def on_apply_suggested():
         try:
-            log("Copiando nombre_sugerido -> nombre_archivo...")
+            ui_status_var.set("Estado: Aplicando sugeridos…")
+            log("Copiando nombre_sugerido → nombre_archivo…")
             n = apply_suggested_to_nombre_archivo(only_if_empty=True, add_pdf_ext=False)
-            log(f"Listo. Se copiaron {n} valores a nomber_archivo.")
+            log(f"Listo. Se copiaron {n} valores a nombre_archivo.")
+            ui_status_var.set(f"Estado: NombreArchivo actualizado ({n})")
             messagebox.showinfo("Listo", f"Copiados a nombre_archivo: {n}\n\n{CONTROL_PATH}")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
             log(f"ERROR copiar sugerido: {e}")
-            messagebox.showerror("Error", str(e))      
-            
+            messagebox.showerror("Error", str(e))
+
     def on_process_pending():
         try:
             refresh_status()
-            
+
             folder = get_saved_outlook_folder()
             if folder is None:
                 messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
                 return
-            
-            attach_dir =get_attachments_folder()
+
+            attach_dir = get_attachments_folder()
             if not attach_dir:
-                messagebox.showerror("Error", "Primero elije la carpeta de adjuntos.")
+                messagebox.showerror("Error", "Primero elige la carpeta de adjuntos.")
                 return
-            
-            #Log inicial
-            
-            log("Procesando pendientes...")
-            
-            n = process_pending_responses (
+
+            ui_status_var.set("Estado: Procesando pendientes…")
+            log("Procesando pendientes…")
+
+            n = process_pending_responses(
                 carpeta_archivos=attach_dir,
                 html_body=None,
                 delay_segundos=1.0,
                 only_first_n=None,
-                logger=log
+                logger=log,
             )
-            
+
+            log(f"Listo. Procesados OK: {n}")
+            ui_status_var.set(f"Estado: Terminado (OK: {n})")
             messagebox.showinfo("Terminado", f"Procesados OK: {n}\n\nRevisa el Excel:\n{CONTROL_PATH}")
         except Exception as e:
+            ui_status_var.set("Estado: Error")
+            log(f"ERROR: {e}")
             messagebox.showerror("Error", str(e))
 
-    btn_folder = ctk.CTkButton(
-        actions, text="Elegir carpeta Outlook", command=on_pick_folder, font=FONT_BUTTON, height=40
+    # -----------------------
+    # UI sections
+    # -----------------------
+
+    # Configuración
+    cfg = _section(frame, "Configuración")
+    cfg.grid_columnconfigure(0, weight=1)
+    cfg.grid_columnconfigure(1, weight=0)
+
+    ctk.CTkLabel(cfg, textvariable=status_var, font=FONT_BODY, **LABEL_COLOR).grid(
+        row=0, column=0, sticky="w", pady=(0, GAP_SM)
     )
-    btn_folder.grid(row=0, column=0, sticky="ew", padx=(0, 8), pady=6)
+    ctk.CTkLabel(cfg, textvariable=attachments_var, font=FONT_BODY, **LABEL_COLOR).grid(
+        row=1, column=0, sticky="w"
+    )
+
+    btn_pick_outlook = ctk.CTkButton(
+        cfg, text="Outlook…", command=on_pick_folder,
+        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
+    )
+    btn_pick_outlook.grid(row=0, column=1, sticky="e", padx=(GAP_MD, 0), pady=(0, GAP_SM))
+
+    btn_pick_attach = ctk.CTkButton(
+        cfg, text="Adjuntos…", command=on_pick_attachments_folder,
+        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
+    )
+    btn_pick_attach.grid(row=1, column=1, sticky="e", padx=(GAP_MD, 0))
+
+    # Acciones
+    act = _section(frame, "Acciones")
+    act.grid_columnconfigure(0, weight=1)
+    act.grid_columnconfigure(1, weight=1)
+    act.grid_columnconfigure(2, weight=2)
 
     btn_update = ctk.CTkButton(
-        actions, text="Actualizar cola", command=on_update_queue, font=FONT_BUTTON, height=40
+        act, text="Actualizar cola", command=on_update_queue,
+        font=FONT_BTN, height=H_SECONDARY, **BTN_SECONDARY
     )
-    btn_update.grid(row=0, column=1, sticky="ew", padx=8, pady=6)
+    btn_update.grid(row=0, column=0, sticky="ew", padx=(0, GAP_MD), pady=(0, GAP_SM))
 
     btn_open = ctk.CTkButton(
-        actions, text="Abrir control.xlsx", command=on_open_control, font=FONT_BUTTON, height=40
+        act, text="Abrir control.xlsx", command=on_open_control,
+        font=FONT_BTN, height=H_SECONDARY, **BTN_SECONDARY
     )
-    btn_open.grid(row=0, column=2, sticky="ew", padx=(8, 0), pady=6)
+    btn_open.grid(row=0, column=1, sticky="ew", padx=(0, GAP_MD), pady=(0, GAP_SM))
 
-    btn_attach =ctk.CTkButton(
-        actions, text="Elegir carpeta adjuntos", command=on_pick_attachments_folder, font=FONT_BUTTON,height=40
-    )
-    btn_attach.grid(row=1, column= 0, sticky="ew", padx=(0,8), pady=6)
-    
     btn_process = ctk.CTkButton(
-        actions, text="Procesar pendientes", command=on_process_pending, font=FONT_BUTTON, height=40
+        act, text="Procesar pendientes", command=on_process_pending,
+        font=FONT_BTN_PRIMARY, height=H_PRIMARY, **BTN_PRIMARY
     )
-    btn_process.grid(row=1, column= 1, sticky="ew", padx=8, pady= 6)
-    
-    btn_suggest = ctk.CTkButton(
-        actions, text="Generar sugeridos", command=on_fill_suggested, font=FONT_BUTTON, height=40
-    )
-    btn_suggest.grid(row=1, column=2, sticky="ew", padx=8, pady=6)
-    
-    btn_apply = ctk.CTkButton(
-        actions, text="Sugerido -> NombreArchivo", command=on_apply_suggested, font=FONT_BUTTON, height=40
-    )
-    btn_apply.grid(row=1, column=3, sticky = "ew", padx=(8,0), pady=6)
-    # ---------- Info ----------
-    info = (
-        "Flujo:\n"
-        "1) Elige la carpeta Outlook donde quedan los correos a responder.\n"
-        "2) Actualiza cola: se llena/actualiza el archivo control.xlsx.\n"
-        "3) Luego (siguiente fase) agregaremos el botón 'Responder' para ReplyAll + adjunto."
-    )
-    ctk.CTkLabel(frame, text=info, justify="left").pack(anchor="w", pady=(PADY_MD, 0))
+    btn_process.grid(row=0, column=2, sticky="ew", pady=(0, GAP_SM))
 
+    # Estado (para usuarios)
+    ctk.CTkLabel(act, textvariable=ui_status_var, font=FONT_BODY, **LABEL_COLOR).grid(
+        row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
+    )
+
+    # Herramientas (terciarias)
+    tools_row = ctk.CTkFrame(act, fg_color="transparent")
+    tools_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
+
+    tools_row.grid_columnconfigure(0, weight=1)
+    tools_row.grid_columnconfigure(1, weight=1)
+    tools_row.grid_columnconfigure(2, weight=1)
+
+    btn_suggest = ctk.CTkButton(
+        tools_row, text="Generar sugeridos", command=on_fill_suggested,
+        font=FONT_BTN_TOOL, height=H_TOOL, **BTN_TOOL
+    )
+    btn_suggest.grid(row=0, column=0, sticky="ew", padx=(0, GAP_MD))
+
+    btn_apply = ctk.CTkButton(
+        tools_row, text="Sugerido → NombreArchivo", command=on_apply_suggested,
+        font=FONT_BTN_TOOL, height=H_TOOL, **BTN_TOOL
+    )
+    btn_apply.grid(row=0, column=1, sticky="ew", padx=(0, GAP_MD))
+
+    btn_show_log = ctk.CTkButton(
+        tools_row, text="Mostrar log", command=_log_toggle,
+        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
+    )
+    btn_show_log.grid(row=0, column=2, sticky="e")
+
+    # Hint
+    hint = (
+        "Flujo:\n"
+        "1) Configura carpeta Outlook y carpeta de adjuntos.\n"
+        "2) Actualiza cola para llenar/actualizar control.xlsx.\n"
+        "3) Procesa pendientes para responder (ReplyAll) y adjuntar archivos.\n"
+        "4) (Opcional) Mostrar log para ver detalle/errores."
+    )
+    ctk.CTkLabel(frame, text=hint, justify="left", font=FONT_BODY, **LABEL_COLOR).pack(
+        anchor="w", pady=(0, GAP_MD)
+    )
+
+    # Inicial
     refresh_status()
+    ui_status_var.set("Estado: Listo")
 
     return frame
