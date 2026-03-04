@@ -8,7 +8,13 @@ from datetime import datetime
 from core.app_settings import get_attachments_folder, set_attachments_folder
 
 from core.outlook_folders import pick_outlook_folder_and_save, get_saved_outlook_folder
-from core.responder_queue import update_control_from_outlook, process_pending_responses, CONTROL_PATH
+from core.responder_queue import (
+    update_control_from_outlook,
+    process_pending_responses,
+    fill_suggested_names,
+    apply_suggested_to_nombre_archivo,
+    CONTROL_PATH,
+)
 
 PADY_SM = 6
 PADY_MD = 10
@@ -142,6 +148,26 @@ def mount(parent):
         except Exception as e:
             messagebox.showerror("Error", str(e))
             
+    def on_fill_suggested():
+        try:
+            log("Generando nombre_sugerido desde subject...")
+            n = fill_suggested_names(year_mode="current", only_if_empty=True)
+            log(f"Listo. Se generaron/actualizaron {n} sugeridos.")
+            messagebox.showinfo("Listo", f"Sugeridos generados: {n}\n\n{CONTROL_PATH}")
+        except Exception as e:
+            log(f"ERROR sugeridos: {e}")
+            messagebox.showerror("Error", str(e))
+            
+    def on_apply_suggested():
+        try:
+            log("Copiando nombre_sugerido -> nombre_archivo...")
+            n = apply_suggested_to_nombre_archivo(only_if_empty=True, add_pdf_ext=False)
+            log(f"Listo. Se copiaron {n} valores a nomber_archivo.")
+            messagebox.showinfo("Listo", f"Copiados a nombre_archivo: {n}\n\n{CONTROL_PATH}")
+        except Exception as e:
+            log(f"ERROR copiar sugerido: {e}")
+            messagebox.showerror("Error", str(e))      
+            
     def on_process_pending():
         try:
             refresh_status()
@@ -197,6 +223,15 @@ def mount(parent):
     )
     btn_process.grid(row=1, column= 1, sticky="ew", padx=8, pady= 6)
     
+    btn_suggest = ctk.CTkButton(
+        actions, text="Generar sugeridos", command=on_fill_suggested, font=FONT_BUTTON, height=40
+    )
+    btn_suggest.grid(row=1, column=2, sticky="ew", padx=8, pady=6)
+    
+    btn_apply = ctk.CTkButton(
+        actions, text="Sugerido -> NombreArchivo", command=on_apply_suggested, font=FONT_BUTTON, height=40
+    )
+    btn_apply.grid(row=1, column=3, sticky = "ew", padx=(8,0), pady=6)
     # ---------- Info ----------
     info = (
         "Flujo:\n"

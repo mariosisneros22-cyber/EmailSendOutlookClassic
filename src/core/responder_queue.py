@@ -2,9 +2,11 @@ import os
 from datetime import datetime
 import pandas as pd
 
-from core.outlook_folders import get_saved_outlook_folder, get_or_create_subfolder
-from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail
+from core.outlook_client import get_outlook_app
+from core.outlook_folders import get_saved_outlook_folder, get_or_create_subfolder, load_selected_folder_ids
+from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail, get_item_by_entry_id, find_latest_in_conversation_by_anchor
 from core.common import safe_join_file
+from core.naming_rules import build_filename_from_subject
 
 CONTROL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__),"..","data", "responder_control.xlsx"))
 
@@ -63,11 +65,25 @@ def ensure_control_file():
             "conversation_id",
             "last_entry_id",
             "subject",
+            "nombre_sugerido",
             "nombre_archivo",
             "estado",
             "fecha_envio",
         ])
         df.to_excel(CONTROL_PATH, index=False)
+        return
+    
+    #Migracion suave
+    df = pd.read_excel(CONTROL_PATH).fillna("")
+    changed = False
+
+    for col in ["nombre_sugerido", "error"]:
+        if col not in df.columns:
+            df[col]= ""
+            changed = True
+
+    if changed:
+        df.to_excel(CONTROL_PATH,index=False)
         
         
 def update_control_from_outlook():
@@ -82,15 +98,20 @@ def update_control_from_outlook():
     messages = fetch_last_messages_by_conversation()
 
     new_rows = []
+
+    
     for msg in messages:
         conv = str(msg["conversation_id"])
         if conv in existing_conv:
             continue
-
+        
+        suggest = build_filename_from_subject(msg["subject"], year_mode="current") or ""
+    
         new_rows.append({
             "conversation_id": conv,
             "last_entry_id": msg["last_entry_id"],
             "subject": msg["subject"],
+            "nombre_sugerido": suggest,
             "nombre_archivo": "",
             "estado": "Pendiente",
             "fecha_envio": "",
@@ -103,7 +124,11 @@ def update_control_from_outlook():
 
     return len(new_rows)
 
-
+def _same_folder(mail_item, folder) -> bool:
+    try:
+        return str(mail_item.Parent.EntryID) == str(folder.EntryID)
+    except Exception:
+        return False
 
 def process_pending_responses(carpeta_archivos: str, html_body: str | None = None, delay_segundos: float = 1.0, only_first_n: int | None = None, logger=None):
     """
@@ -151,9 +176,24 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
         try:
             pdf_path = safe_join_file(carpeta_archivos, nombre_archivo)
             
-            last_mail=find_latest_in_conversation(folder,conv_id)
+            outlook = get_outlook_app()
+            if outlook is None:
+                raise RuntimeError("No se pudo acceder a Outlook.")
+            ns = outlook.GetNamespace("MAPI")
+            store_id, _folder_entry_id = load_selected_folder_ids()
+            
+            anchor_entry_id = str(df.at[idx, "last_entry_id"]).strip()
+            if not anchor_entry_id:
+                raise RuntimeError("last_entry_id vacío en el control.xlsx")
+            
+            anchor_mail=get_item_by_entry_id(ns, anchor_entry_id, store_id)            
+            
+            last_mail = anchor_mail
+            #last_mail=find_latest_in_conversation_by_anchor(ns, anchor_mail)
+            
             if last_mail is None:
                 raise RuntimeError("No se encontró el último mail del hilo en la carpeta seleccionada.")
+            
             reply_all_with_attachment(
                 last_mail,
                 pdf_path=pdf_path,
@@ -161,17 +201,33 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
                 delay_segundos=delay_segundos
             )
             
-            #mover el mail "ultimo" a Procesados
-            move_mail(last_mail, folder_done)
-            
             df.at[idx, "estado"]="Enviado"
             df.at[idx, "fecha_envio"] =datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             df.at[idx, "error"] =""
             procesados += 1
             
+           
+            #mover el mail "ultimo" a Procesados
+            try:
+                if _same_folder(last_mail,folder):
+                    move_mail(last_mail, folder_done)
+                else:
+                    if callable(logger):
+                        try:
+                            logger(f"Skip move: está en otra carpeta ({getattr(last_mail.Parent, 'Name','?')})")
+                        except Exception:
+                            logger("Skip move: está en otra carpeta")
+            except Exception as e:
+                if callable (logger):
+                    logger(f"WARN move: {e}")
+                df.at[idx,"error"] = f"WARN move: {e}"
+
         except Exception as e:
-            df.at[idx, "estado"]="Error"
-            df.at[idx,"error"] = str(e)
+            if str(df.at[idx, "estado"]).strip().lower() == "enviado":
+                df.at[idx, "error"] = f"WARN post-send: {e}"
+            else:
+                df.at[idx, "estado"] = "Error"
+                df.at[idx, "error"] = str(e)
     
     df.to_excel(CONTROL_PATH, index=False)
     
@@ -179,3 +235,56 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
         logger(f"Procesados OK: {procesados}")
         
     return procesados
+
+def fill_suggested_names(year_mode: str = "current", only_if_empty: bool = True) -> int:
+    ensure_control_file()
+    df = pd.read_excel(CONTROL_PATH).fillna("")
+    
+    if "nombre_sugerido" not in df.columns:
+        df["nombre_sugerido"] = ""
+    
+    changed = 0
+    for i in df.index:
+        if only_if_empty and str(df.at[i, "nombre_sugerido"]).strip():
+            continue
+        
+        subject= str(df.at[i, "subject"]).strip()
+        if "subject" not in df.columns:
+            return 0
+        
+        suggest = build_filename_from_subject(subject, year_mode=year_mode)
+        if suggest:
+            df.at[i, "nombre_sugerido"]= suggest
+            changed +=1
+    
+    df.to_excel(CONTROL_PATH, index = False)
+    return changed
+
+def apply_suggested_to_nombre_archivo(only_if_empty: bool = True, add_pdf_ext:bool = False) -> int:
+    ensure_control_file()
+    df= pd.read_excel(CONTROL_PATH).fillna("")
+    
+    for col in ["nombre_sugerido", "nombre_archivo"]:
+        if col not in df.columns:
+            df[col]= ""
+            
+    changed = 0
+    for i in df.index:
+        sugerido = str(df.at[i, "nombre_sugerido"]).strip()
+        if not sugerido:
+            continue
+            
+        actual = str(df.at[i, "nombre_archivo"]).strip()
+        if only_if_empty and actual:
+            continue
+        
+        v = sugerido
+        if add_pdf_ext and not v.lower().endswith(".pdf"):
+            v += ".pdf"
+        
+        if v != actual:
+            df.at[i, "nombre_archivo"] = v
+            changed += 1
+        
+    df.to_excel(CONTROL_PATH, index=False)
+    return changed    

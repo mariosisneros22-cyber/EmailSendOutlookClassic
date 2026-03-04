@@ -4,3 +4,4 @@ venv
 /build/dist
 /build/work
 
+/src/data

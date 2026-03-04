@@ -29,7 +29,7 @@ def find_latest_in_conversation(folder, conversation_id:str):
         try:
             if getattr(it, "ConversationID", None) != conversation_id:
                 continue
-            rt = getattr(it, "ReceivedItem", None)
+            rt = getattr(it, "ReceivedTime", None)
             #fallback si no hay ReceivedTime
             if rt is None:
                 continue
@@ -67,11 +67,56 @@ def reply_all_with_attachment(mail_item, pdf_path: str, html_body: str | None = 
         os.remove(tmp)
     except Exception:
         pass
+
+
+def get_item_by_entry_id(ns, entry_id: str, store_id: str | None = None):
+    if store_id:
+        return ns.GetItemFromID(entry_id, store_id)
+    return ns.GetItemFromID(entry_id)
+
+def iter_conversation_items(conversation):
+    stack = []
+    roots = conversation.GetRootItems()
+    for r in roots:
+        stack.append(r)
+        
+    while stack:
+        it = stack.pop()
+        yield it
+        try:
+            children = conversation.GetChildren(it)
+            for ch in children:
+                stack.append(ch)
+        except Exception:
+            pass
+        
+def find_latest_in_conversation_by_anchor(ns, anchor_mail, only_mailitems=True):
+    conv = anchor_mail.GetConversation()
+    if conv is None:
+        return None
     
+    latest = None
+    latest_dt = None
+    
+    for it in iter_conversation_items(conv):
+        try:
+            if only_mailitems and getattr(it, "Class", None) != MAILITEM_CLASS:
+                continue
+            dt= getattr(it, "ReceivedTime", None)
+            if dt is None: 
+                continue 
+            if latest_dt is None or dt > latest_dt:
+                latest = it
+                latest_dt = dt
+        except Exception:
+            continue
+    return latest
+
+
 def move_mail(mail_item, target_folder):
     """
     Mueve el mail_item a target_folder.
     Importante: después de Move(), el objeto original deja de ser válido en algunas situaciones.
     """
     mail_item.Move(target_folder)
-    
+
