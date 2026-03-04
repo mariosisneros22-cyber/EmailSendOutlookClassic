@@ -16,3 +16,8 @@ def config_path() -> Path:
 
 def responder_control_path()->Path:
     return data_dir() / "responder_control.xlsx"
+
+
+
+CONFIG_PATH=config_path()
+RESPONDER_CONTROL_PATH=responder_control_path()

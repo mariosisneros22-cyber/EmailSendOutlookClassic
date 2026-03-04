@@ -7,9 +7,9 @@ from core.outlook_folders import get_saved_outlook_folder, get_or_create_subfold
 from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail, get_item_by_entry_id, find_latest_in_conversation_by_anchor
 from core.common import safe_join_file
 from core.naming_rules import build_filename_from_subject
+from core.app_dirs import RESPONDER_CONTROL_PATH
 
-CONTROL_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__),"..","data", "responder_control.xlsx"))
-
+CONTROL_PATH = str(RESPONDER_CONTROL_PATH)
 
 MAILITEM_CLASS=43
 

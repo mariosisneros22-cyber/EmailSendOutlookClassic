@@ -1,20 +1,19 @@
 # core/outlook_folders.py
 import json, os
 from core.outlook_client import get_outlook_app
+from core.config_store import load_config, save_config
 
-CONFIG_PATH = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "data", "config.json"))
 
+
+    
 def save_selected_folder(store_id: str, entry_id: str):
-    os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
-    data = {"queue_folder_store_id": store_id, "queue_folder_entry_id": entry_id}
-    with open(CONFIG_PATH, "w", encoding="utf-8") as f:
-        json.dump(data, f, indent=2)
+    data = load_config()
+    data["queue_folder_store_id"] = store_id
+    data["queue_folder_entry_id"] = entry_id
+    save_config(data)
 
 def load_selected_folder_ids():
-    if not os.path.exists(CONFIG_PATH):
-        return None, None
-    with open(CONFIG_PATH, "r", encoding="utf-8") as f:
-        data = json.load(f)
+    data = load_config()
     return data.get("queue_folder_store_id"), data.get("queue_folder_entry_id")
 
 def pick_outlook_folder_and_save():
