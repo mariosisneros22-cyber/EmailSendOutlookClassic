@@ -1,5 +1,4 @@
 # core/outlook_folders.py
-import json, os
 from core.outlook_client import get_outlook_app
 from core.config_store import load_config, save_config
 

@@ -1,6 +1,9 @@
 # common.py
+import os
+import shutil
+import tempfile
+
 import pandas as pd
-import os, tempfile, shutil
 
 
 def _cell_text(v) -> str:
@@ -32,7 +35,12 @@ def _asegurar_leible(path: str):
 def _copiar_a_temp_corto(ruta: str) -> str:
     tmp_dir = os.path.join(tempfile.gettempdir(), "app_correo_adjuntos")
     os.makedirs(tmp_dir, exist_ok=True)
-    destino = os.path.join(tmp_dir, os.path.basename(ruta))
+    base_name = os.path.basename(ruta)
+    stem, ext = os.path.splitext(base_name)
+    safe_stem = (stem or "adjunto")[:40]
+
+    fd, destino = tempfile.mkstemp(prefix=f"{safe_stem}_", suffix=ext, dir=tmp_dir)
+    os.close(fd)
     shutil.copy2(ruta, destino)
     return destino
 

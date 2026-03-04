@@ -1,4 +1,6 @@
 # ui/modal_run.py
+import queue
+import threading
 import tkinter as tk
 import tkinter.messagebox as mb
 import customtkinter as ctk
@@ -21,12 +23,13 @@ def run_with_modal(
       - on_progress (callable(i,total,estado,*extras))
 
     Este modal inyecta:
-      - progress: CTkProgressBar del modal
-      - root: modal
-      - is_cancelled: lambda cancel_var.get()
-      - on_progress: callback que actualiza labels
+      - progress: None (UI se actualiza por cola de eventos)
+      - root: None
+      - is_cancelled: stop_event.is_set
+      - on_progress: callback encolado y procesado en el hilo UI
     """
-    cancel_var = tk.BooleanVar(master=root, value=False)
+    stop_event = threading.Event()
+    event_queue: queue.Queue = queue.Queue()
 
     modal = ctk.CTkToplevel(root)
     modal.title(title)
@@ -61,62 +64,112 @@ def run_with_modal(
     modal.protocol("WM_DELETE_WINDOW", on_close)
 
     def on_stop():
-        cancel_var.set(True)
-        status_lbl.configure(text="Cancelando…")
+        stop_event.set()
+        status_lbl.configure(text="Cancelando...")
 
     def _on_progress(i, total, estado, *extras):
         count_lbl.configure(text=f"{i} / {total}")
+        try:
+            frac = float(i) / float(total or 1)
+            modal_progress.set(max(0.0, min(1.0, frac)))
+        except Exception:
+            pass
         est = (str(estado) or "").strip().lower()
         if est.startswith("error"):
             status_lbl.configure(text=f"Error en {i}/{total}")
         else:
             status_lbl.configure(text=f"Procesando {i}/{total}...")
 
+    def _finish_ok(result):
+        enviando["flag"] = False
+        btn_stop.configure(state="disabled")
+        btn_cerrar.configure(state="normal")
+        btn_iniciar.configure(state="normal")
+
+        if callable(set_ui_busy):
+            set_ui_busy(False)
+
+        if isinstance(result, dict):
+            msg = str(result.get("mensaje", "")).strip()
+            if msg:
+                mb.showinfo("Proceso finalizado", msg)
+        status_lbl.configure(text="Proceso finalizado.")
+
+    def _finish_error(exc):
+        enviando["flag"] = False
+        btn_stop.configure(state="disabled")
+        btn_cerrar.configure(state="normal")
+        btn_iniciar.configure(state="normal")
+
+        if callable(set_ui_busy):
+            set_ui_busy(False)
+
+        mb.showerror("Error", str(exc))
+        status_lbl.configure(text="Error.")
+
+    def _poll_events(user_on_progress):
+        try:
+            while True:
+                kind, payload = event_queue.get_nowait()
+                if kind == "progress":
+                    i, total_i, estado, extras = payload
+                    _on_progress(i, total_i, estado, *extras)
+                    if callable(user_on_progress):
+                        try:
+                            user_on_progress(i, total_i, estado, *extras)
+                        except Exception:
+                            pass
+                elif kind == "done_ok":
+                    _finish_ok(payload)
+                    return
+                elif kind == "done_err":
+                    _finish_error(payload)
+                    return
+        except queue.Empty:
+            pass
+
+        if enviando["flag"] and modal.winfo_exists():
+            modal.after(80, lambda: _poll_events(user_on_progress))
+
     def iniciar():
         btn_iniciar.configure(state="disabled")
         btn_cerrar.configure(state="disabled")
         btn_stop.configure(state="normal")
 
-        cancel_var.set(False)
+        stop_event.clear()
         enviando["flag"] = True
 
         if callable(set_ui_busy):
             set_ui_busy(True)
 
-        status_lbl.configure(text="Procesando…")
+        status_lbl.configure(text="Procesando...")
+        modal_progress.set(0)
+        count_lbl.configure(text=f"0 / {total}")
 
         # inyectar args comunes
         kwargs = dict(runner_kwargs or {})
-        kwargs["progress"] = modal_progress
-        kwargs["root"] = modal
-        kwargs["is_cancelled"] = lambda: cancel_var.get()
+        kwargs["progress"] = None
+        kwargs["root"] = None
+        kwargs["is_cancelled"] = stop_event.is_set
 
         # Encadenar callback si el runner ya trae on_progress
         user_on_progress = kwargs.get("on_progress", None)
 
-        def chained(i, total, estado, *extras):
-            _on_progress(i, total, estado, *extras)
-            if callable(user_on_progress):
-                try:
-                    user_on_progress(i, total, estado, *extras)
-                except Exception:
-                    pass
+        def queued_progress(i, total_i, estado, *extras):
+            event_queue.put(("progress", (i, total_i, estado, extras)))
 
-        kwargs["on_progress"] = chained
+        kwargs["on_progress"] = queued_progress
 
-        try:
-            runner(**kwargs)
-            status_lbl.configure(text="Proceso finalizado.")
-        except Exception as e:
-            mb.showerror("Error", str(e))
-            status_lbl.configure(text="Error.")
-        finally:
-            enviando["flag"] = False
-            btn_stop.configure(state="disabled")
-            btn_cerrar.configure(state="normal")
+        def worker():
+            try:
+                result = runner(**kwargs)
+                event_queue.put(("done_ok", result))
+            except Exception as exc:
+                event_queue.put(("done_err", exc))
 
-            if callable(set_ui_busy):
-                set_ui_busy(False)
+        t = threading.Thread(target=worker, daemon=True)
+        t.start()
+        _poll_events(user_on_progress)
 
     btn_cerrar = ctk.CTkButton(btns, text="Cerrar", command=on_close)
     btn_cerrar.pack(side="right")

@@ -1,10 +1,8 @@
 # core/responder_sender.py
 import os 
 import time
-from datetime import datetime
 
-from core.common import _asegurar_leible, _copiar_a_temp_corto, safe_join_file
-from core.outlook_client import get_outlook_app
+from core.common import _asegurar_leible, _copiar_a_temp_corto
 
 MAILITEM_CLASS=43
 

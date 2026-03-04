@@ -7,6 +7,7 @@ import customtkinter as ctk
 import os, shutil
 
 from mailer import enviar_correos
+from core.common import _cell_text
 from ui.modal_run import run_with_modal
 
 PREVIEW_N = 5
@@ -181,15 +182,6 @@ def _load_preview_df(n=PREVIEW_N):
         preview_row = None
 
 
-def _safe_cell_to_text(v):
-    try:
-        if pd.isna(v):
-            return ""
-    except Exception:
-        pass
-    return str(v).strip()
-
-
 def actualizar_tabla_preview():
     for item in preview_tree.get_children():
         preview_tree.delete(item)
@@ -202,9 +194,9 @@ def actualizar_tabla_preview():
     col_a = cb_archivo.get().strip()
 
     for idx, (_, row) in enumerate(preview_df.iterrows(), start=1):
-        v_n = _safe_cell_to_text(row[col_n]) if col_n and col_n in preview_df.columns else ""
-        v_c = _safe_cell_to_text(row[col_c]) if col_c and col_c in preview_df.columns else ""
-        v_a = _safe_cell_to_text(row[col_a]) if col_a and col_a in preview_df.columns else ""
+        v_n = _cell_text(row[col_n]) if col_n and col_n in preview_df.columns else ""
+        v_c = _cell_text(row[col_c]) if col_c and col_c in preview_df.columns else ""
+        v_a = _cell_text(row[col_a]) if col_a and col_a in preview_df.columns else ""
         preview_tree.insert("", "end", values=(idx, v_n, v_c, v_a))
 
 
@@ -213,9 +205,9 @@ def actualizar_vista_previa(event=None):
     col_c = cb_correo.get().strip()
     col_a = cb_archivo.get().strip()
 
-    _ = _safe_cell_to_text(preview_row.get(col_n, "")) if col_n and preview_row else ""
-    _ = _safe_cell_to_text(preview_row.get(col_c, "")) if col_c and preview_row else ""
-    _ = _safe_cell_to_text(preview_row.get(col_a, "")) if col_a and preview_row else ""
+    _ = _cell_text(preview_row.get(col_n, "")) if col_n and preview_row else ""
+    _ = _cell_text(preview_row.get(col_c, "")) if col_c and preview_row else ""
+    _ = _cell_text(preview_row.get(col_a, "")) if col_a and preview_row else ""
 
     actualizar_tabla_preview()
 
@@ -350,7 +342,7 @@ def abrir_modal_envio_y_ejecutar():
     Modal que confirma y luego muestra progreso.
     - NO usa messagebox.askyesno
     - Usa progressbar dentro del modal
-    - Usa cancel_var para STOP
+    - Usa STOP con cancelación cooperativa
     """
     # ---------- Validaciones rápidas (reusa lo que ya tienes) ----------
     ruta_excel = excel_entry.get().strip()
@@ -431,6 +423,7 @@ def abrir_modal_envio_y_ejecutar():
         header_idx=_get_header_index(),
         logo_path=selected_logo_path,
         report_title=titulo_reporte_entry.get().strip(),
+        show_summary_messagebox=False,
     )
 
     try:
@@ -464,7 +457,6 @@ def mount(parent):
     global preview_tree, cb_logo, lbl_logo_estado
     global gen_excel_var, gen_pdf_var, chk_excel, chk_pdf
     global reporte_entry, btn_reporte, titulo_reporte_entry
-    global cancel_var
     global max_entry, delay_entry, header_row_entry
     root = parent.winfo_toplevel()
 
@@ -488,7 +480,6 @@ def mount(parent):
     style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
     style.configure("TCombobox", padding=4)
 
-    cancel_var = tk.BooleanVar(master=root, value=False)
     frame_main = ctk.CTkFrame(parent)
     frame_main.pack(fill="both", expand=True, padx=10, pady=10)
     frame_main.columnconfigure(0, weight=1)

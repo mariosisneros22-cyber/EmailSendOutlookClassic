@@ -94,6 +94,7 @@ def enviar_correos(
     logo_path: str | None = None,  # <-- NUEVO
     report_title: str = "Registro de envío de correos",
     on_progress=None,
+    show_summary_messagebox: bool = True,
 ):
     if not ruta_excel or not os.path.isfile(ruta_excel):
         raise FileNotFoundError("Selecciona un archivo Excel (.xlsx) válido.")
@@ -398,19 +399,33 @@ def enviar_correos(
             msg = f"Envío CANCELADO.\n\nProcesados: {procesados} de {total}."
             if rutas_generadas:
                 msg += "\n\nInformes generados:\n" + "\n".join(rutas_generadas)
-            messagebox.showwarning("Cancelado", msg)
-            return
+            if show_summary_messagebox:
+                messagebox.showwarning("Cancelado", msg)
+            return {
+                "cancelado": True,
+                "procesados": procesados,
+                "total": total,
+                "rutas_generadas": rutas_generadas,
+                "mensaje": msg,
+            }
 
         if rutas_generadas:
-            messagebox.showinfo(
-                "Proceso finalizado",
-                "Envío terminado.\n\nInformes generados:\n"
-                + "\n".join(rutas_generadas),
+            final_msg = "Envío terminado.\n\nInformes generados:\n" + "\n".join(
+                rutas_generadas
             )
         else:
-            messagebox.showinfo(
-                "Proceso finalizado", "Envío terminado (sin generar informe)."
-            )
+            final_msg = "Envío terminado (sin generar informe)."
+
+        if show_summary_messagebox:
+            messagebox.showinfo("Proceso finalizado", final_msg)
+
+        return {
+            "cancelado": False,
+            "procesados": procesados,
+            "total": total,
+            "rutas_generadas": rutas_generadas,
+            "mensaje": final_msg,
+        }
     finally:
         # limpia logo temporal
         if logo_tmp_to_cleanup and os.path.isfile(logo_tmp_to_cleanup):

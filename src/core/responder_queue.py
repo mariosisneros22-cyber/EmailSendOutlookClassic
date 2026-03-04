@@ -3,8 +3,16 @@ from datetime import datetime
 import pandas as pd
 
 from core.outlook_client import get_outlook_app
-from core.outlook_folders import get_saved_outlook_folder, get_or_create_subfolder, load_selected_folder_ids
-from core.responder_sender import find_latest_in_conversation, reply_all_with_attachment, move_mail, get_item_by_entry_id, find_latest_in_conversation_by_anchor
+from core.outlook_folders import (
+    get_or_create_subfolder,
+    get_saved_outlook_folder,
+    load_selected_folder_ids,
+)
+from core.responder_sender import (
+    get_item_by_entry_id,
+    move_mail,
+    reply_all_with_attachment,
+)
 from core.common import safe_join_file
 from core.naming_rules import build_filename_from_subject
 from core.app_dirs import RESPONDER_CONTROL_PATH
@@ -144,6 +152,12 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
     folder = get_saved_outlook_folder()
     if folder is None:
         raise RuntimeError("No hay carpeta seleccionada.")
+
+    outlook = get_outlook_app()
+    if outlook is None:
+        raise RuntimeError("No se pudo acceder a Outlook.")
+    ns = outlook.GetNamespace("MAPI")
+    store_id, _folder_entry_id = load_selected_folder_ids()
     
     folder_done = get_or_create_subfolder(folder,"Procesados")
     
@@ -175,13 +189,7 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
         
         try:
             pdf_path = safe_join_file(carpeta_archivos, nombre_archivo)
-            
-            outlook = get_outlook_app()
-            if outlook is None:
-                raise RuntimeError("No se pudo acceder a Outlook.")
-            ns = outlook.GetNamespace("MAPI")
-            store_id, _folder_entry_id = load_selected_folder_ids()
-            
+
             anchor_entry_id = str(df.at[idx, "last_entry_id"]).strip()
             if not anchor_entry_id:
                 raise RuntimeError("last_entry_id vacío en el control.xlsx")

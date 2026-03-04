@@ -7,3 +7,10 @@ venv
 /src/data
 
 .pycache_global
+
+tests
+
+pytest.ini
+
+
+
