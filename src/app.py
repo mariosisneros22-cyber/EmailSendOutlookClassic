@@ -1,4 +1,13 @@
 # app.py
+import os
+from pathlib import Path
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1] 
+PYCACHE_DIR =PROJECT_ROOT / ".pycache_global"
+PYCACHE_DIR.mkdir(parents=True, exist_ok=True)
+os.environ["PYTHONPYCACHEPREFIX"] = str(PYCACHE_DIR)
+
+
 import customtkinter as ctk
 
 from ui.bulk_tab import mount as mount_bulk

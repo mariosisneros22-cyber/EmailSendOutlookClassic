@@ -5,3 +5,5 @@ venv
 /build/work
 
 /src/data
+
+.pycache_global
