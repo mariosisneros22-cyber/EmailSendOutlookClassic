@@ -2,7 +2,7 @@
 import os 
 import time
 
-from core.common import _asegurar_leible, _copiar_a_temp_corto
+from core.shared.file_utils import _asegurar_leible, _copiar_a_temp_corto
 
 MAILITEM_CLASS=43
 

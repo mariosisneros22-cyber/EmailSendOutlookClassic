@@ -1,6 +1,6 @@
 # core/outlook_folders.py
-from core.outlook_client import get_outlook_app
-from core.config_store import load_config, save_config
+from .outlook_client import get_outlook_app
+from core.config.config_store import load_config, save_config
 
 
 

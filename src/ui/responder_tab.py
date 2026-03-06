@@ -7,9 +7,9 @@ from tkinter import filedialog, messagebox
 
 import customtkinter as ctk
 
-from core.app_settings import get_attachments_folder, set_attachments_folder
-from core.outlook_folders import pick_outlook_folder_and_save, get_saved_outlook_folder
-from core.responder_queue import (
+from core.config.app_settings import get_attachments_folder, set_attachments_folder
+from core.outlook.outlook_folders import pick_outlook_folder_and_save, get_saved_outlook_folder
+from core.responder.responder_queue import (
     update_control_from_outlook,
     process_pending_responses,
     fill_suggested_names,

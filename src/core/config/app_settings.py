@@ -1,7 +1,7 @@
 #core/app_settings.py
 
 from pathlib import Path
-from core.config_store import load_config, save_config
+from core.config.config_store import load_config, save_config
         
 def set_attachments_folder(path: str) -> None:
     if not path:

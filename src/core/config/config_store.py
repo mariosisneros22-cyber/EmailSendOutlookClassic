@@ -1,7 +1,7 @@
 #core/config_store.py
 
 import json
-from core.app_dirs import CONFIG_PATH
+from core.config.app_dirs import CONFIG_PATH
 
 def load_config() -> dict:
     if not CONFIG_PATH.exists():

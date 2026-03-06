@@ -6,8 +6,8 @@ import pandas as pd
 import customtkinter as ctk
 import os, shutil
 
-from core.bulk_sender import enviar_correos
-from core.common import _cell_text
+from core.bulk.bulk_sender import enviar_correos
+from core.shared.text_utils import _cell_text
 from ui.modal_run import run_with_modal
 
 PREVIEW_N = 5

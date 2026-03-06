@@ -2,21 +2,21 @@ import os
 from datetime import datetime
 import pandas as pd
 
-from core.outlook_client import get_outlook_app
-from core.outlook_folders import (
+from core.outlook.outlook_client import get_outlook_app
+from core.outlook.outlook_folders import (
     get_or_create_subfolder,
     get_saved_outlook_folder,
     load_selected_folder_ids,
 )
-from core.responder_sender import (
+from core.responder.responder_sender import (
     get_item_by_entry_id,
     move_mail,
     reply_all_with_attachment,
     find_latest_in_conversation_by_anchor
 )
-from core.common import safe_join_file
-from core.naming_rules import build_filename_from_subject
-from core.app_dirs import RESPONDER_CONTROL_PATH
+from core.shared.file_utils import safe_join_file
+from core.shared.naming_rules import build_filename_from_subject
+from core.config.app_dirs import RESPONDER_CONTROL_PATH
 
 CONTROL_PATH = str(RESPONDER_CONTROL_PATH)
 

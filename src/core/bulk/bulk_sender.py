@@ -7,15 +7,11 @@ from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.styles import Alignment, Font
 
-from core.common import (
-    _cell_text,
-    _asegurar_leible,
-    _copiar_a_temp_corto,
-    _progress_init,
-    _progress_set,
-    safe_join_file,
-)
-from core.outlook_client import get_outlook_app
+from core.shared.file_utils import _asegurar_leible, _copiar_a_temp_corto, safe_join_file
+from core.shared.progress import _progress_init, _progress_set
+from core.shared.text_utils import _cell_text
+    
+from core.outlook.outlook_client import get_outlook_app
 
 from reports.report_pdf import generar_pdf_registro
 
