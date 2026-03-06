@@ -16,48 +16,24 @@ from core.responder.responder_queue import (
     apply_suggested_to_nombre_archivo,
     CONTROL_PATH,
 )
-
-# -----------------------
-# UI tokens (locales)
-# -----------------------
-PAD_OUTER = 10
-PAD_INNER = 14
-GAP_SM = 6
-GAP_MD = 10
-
-FONT_TITLE = ("Segoe UI", 18, "bold")
-FONT_SECTION = ("Segoe UI", 14, "bold")
-FONT_BODY = ("Segoe UI", 13)
-
-FONT_BTN_PRIMARY = ("Segoe UI", 13, "bold")
-FONT_BTN = ("Segoe UI", 12)
-FONT_BTN_TOOL = ("Segoe UI", 11)
-
-H_PRIMARY = 46
-H_SECONDARY = 36
-H_TOOL = 30
-
-BTN_PRIMARY = dict(
-    fg_color=("#2563eb", "#2563eb"),
-    hover_color=("#1d4ed8", "#1d4ed8"),
-    text_color="white",
+from ui.theme import (
+    CARD_BORDER_COLOR,
+    CARD_FG_COLOR,
+    FONT_BODY,
+    FONT_SECTION,
+    FONT_TITLE,
+    GAP_MD,
+    GAP_SM,
+    LABEL_COLOR,
+    PAD_INNER,
+    PAD_OUTER,
 )
-
-BTN_SECONDARY = dict(
-    fg_color=("#e5e7eb", "#2a2a2a"),
-    hover_color=("#d1d5db", "#3a3a3a"),
-    text_color=("#111111", "#eaeaea"),
+from ui.widgets import (
+    make_primary_button,
+    make_section_card,
+    make_secondary_button,
+    make_tool_button,
 )
-
-BTN_TOOL = dict(
-    fg_color="transparent",
-    hover_color=("#f3f4f6", "#2b2b2b"),
-    border_width=1,
-    border_color=("#cfcfcf", "#3a3a3a"),
-    text_color=("#111111", "#eaeaea"),
-)
-
-LABEL_COLOR = dict(text_color=("#111111", "#eaeaea"))
 
 
 # -----------------------
@@ -80,26 +56,6 @@ def _safe_folder_name(folder) -> str:
 
 def _now_ts() -> str:
     return datetime.now().strftime("%H:%M:%S")
-
-
-def _section(parent, title: str) -> ctk.CTkFrame:
-    card = ctk.CTkFrame(
-        parent,
-        corner_radius=12,
-        border_width=1,
-        border_color=("#d0d0d0", "#3a3a3a"),
-        fg_color=("#ffffff", "#1f1f1f"),
-    )
-    card.pack(fill="x", pady=(0, GAP_MD))
-
-    header = ctk.CTkFrame(card, fg_color="transparent")
-    header.pack(fill="x", padx=PAD_INNER, pady=(PAD_INNER, 6))
-
-    ctk.CTkLabel(header, text=title, font=FONT_SECTION, **LABEL_COLOR).pack(anchor="w")
-
-    body = ctk.CTkFrame(card, fg_color="transparent")
-    body.pack(fill="x", padx=PAD_INNER, pady=(0, PAD_INNER))
-    return body
 
 
 # -----------------------
@@ -128,8 +84,8 @@ def mount(parent):
         frame,
         corner_radius=12,
         border_width=1,
-        border_color=("#d0d0d0", "#3a3a3a"),
-        fg_color=("#ffffff", "#1f1f1f"),
+        border_color=CARD_BORDER_COLOR,
+        fg_color=CARD_FG_COLOR,
     )
     log_hdr = ctk.CTkFrame(log_card, fg_color="transparent")
     log_body = ctk.CTkFrame(log_card, fg_color="transparent")
@@ -171,14 +127,10 @@ def mount(parent):
 
     ctk.CTkLabel(log_hdr, text="Log (detalle)", font=FONT_SECTION, **LABEL_COLOR).pack(side="left")
 
-    btn_hide = ctk.CTkButton(
-        log_hdr, text="Ocultar", width=90, height=H_TOOL, font=FONT_BTN_TOOL, command=_log_hide, **BTN_TOOL
-    )
+    btn_hide = make_tool_button(log_hdr, text="Ocultar", command=_log_hide, width=90)
     btn_hide.pack(side="right", padx=(GAP_SM, 0))
 
-    btn_clear = ctk.CTkButton(
-        log_hdr, text="Limpiar", width=90, height=H_TOOL, font=FONT_BTN_TOOL, command=_log_clear, **BTN_TOOL
-    )
+    btn_clear = make_tool_button(log_hdr, text="Limpiar", command=_log_clear, width=90)
     btn_clear.pack(side="right", padx=(GAP_SM, 0))
 
     # -----------------------
@@ -417,7 +369,7 @@ def mount(parent):
     # UI sections
     # -----------------------
 
-    cfg = _section(frame, "Configuración")
+    cfg = make_section_card(frame, "Configuracion")
     cfg.grid_columnconfigure(0, weight=1)
     cfg.grid_columnconfigure(1, weight=0)
 
@@ -428,39 +380,26 @@ def mount(parent):
         row=1, column=0, sticky="w"
     )
 
-    btn_pick_outlook = ctk.CTkButton(
-        cfg, text="Outlook…", command=on_pick_folder,
-        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
-    )
+    btn_pick_outlook = make_tool_button(cfg, text="Outlook…", command=on_pick_folder, width=120)
     btn_pick_outlook.grid(row=0, column=1, sticky="e", padx=(GAP_MD, 0), pady=(0, GAP_SM))
 
-    btn_pick_attach = ctk.CTkButton(
-        cfg, text="Adjuntos…", command=on_pick_attachments_folder,
-        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
+    btn_pick_attach = make_tool_button(
+        cfg, text="Adjuntos…", command=on_pick_attachments_folder, width=120
     )
     btn_pick_attach.grid(row=1, column=1, sticky="e", padx=(GAP_MD, 0))
 
-    act = _section(frame, "Acciones")
+    act = make_section_card(frame, "Acciones")
     act.grid_columnconfigure(0, weight=1)
     act.grid_columnconfigure(1, weight=1)
     act.grid_columnconfigure(2, weight=2)
 
-    btn_update = ctk.CTkButton(
-        act, text="Actualizar cola", command=on_update_queue,
-        font=FONT_BTN, height=H_SECONDARY, **BTN_SECONDARY
-    )
+    btn_update = make_secondary_button(act, text="Actualizar cola", command=on_update_queue)
     btn_update.grid(row=0, column=0, sticky="ew", padx=(0, GAP_MD), pady=(0, GAP_SM))
 
-    btn_open = ctk.CTkButton(
-        act, text="Abrir control.xlsx", command=on_open_control,
-        font=FONT_BTN, height=H_SECONDARY, **BTN_SECONDARY
-    )
+    btn_open = make_secondary_button(act, text="Abrir control.xlsx", command=on_open_control)
     btn_open.grid(row=0, column=1, sticky="ew", padx=(0, GAP_MD), pady=(0, GAP_SM))
 
-    btn_process = ctk.CTkButton(
-        act, text="Procesar pendientes", command=on_process_pending,
-        font=FONT_BTN_PRIMARY, height=H_PRIMARY, **BTN_PRIMARY
-    )
+    btn_process = make_primary_button(act, text="Procesar pendientes", command=on_process_pending)
     btn_process.grid(row=0, column=2, sticky="ew", pady=(0, GAP_SM))
 
     ctk.CTkLabel(act, textvariable=ui_status_var, font=FONT_BODY, **LABEL_COLOR).grid(
@@ -474,22 +413,15 @@ def mount(parent):
     tools_row.grid_columnconfigure(1, weight=1)
     tools_row.grid_columnconfigure(2, weight=1)
 
-    btn_suggest = ctk.CTkButton(
-        tools_row, text="Generar sugeridos", command=on_fill_suggested,
-        font=FONT_BTN_TOOL, height=H_TOOL, **BTN_TOOL
-    )
+    btn_suggest = make_tool_button(tools_row, text="Generar sugeridos", command=on_fill_suggested)
     btn_suggest.grid(row=0, column=0, sticky="ew", padx=(0, GAP_MD))
 
-    btn_apply = ctk.CTkButton(
-        tools_row, text="Sugerido → NombreArchivo", command=on_apply_suggested,
-        font=FONT_BTN_TOOL, height=H_TOOL, **BTN_TOOL
+    btn_apply = make_tool_button(
+        tools_row, text="Sugerido → NombreArchivo", command=on_apply_suggested
     )
     btn_apply.grid(row=0, column=1, sticky="ew", padx=(0, GAP_MD))
 
-    btn_show_log = ctk.CTkButton(
-        tools_row, text="Mostrar log", command=_log_toggle,
-        font=FONT_BTN_TOOL, height=H_TOOL, width=120, **BTN_TOOL
-    )
+    btn_show_log = make_tool_button(tools_row, text="Mostrar log", command=_log_toggle, width=120)
     btn_show_log.grid(row=0, column=2, sticky="e")
 
     hint = (

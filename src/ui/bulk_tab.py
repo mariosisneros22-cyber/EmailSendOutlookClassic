@@ -1,6 +1,6 @@
 #ui/bulk_tab.py
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox
 from datetime import datetime
 import pandas as pd
 import customtkinter as ctk
@@ -9,14 +9,23 @@ import os, shutil
 from core.bulk.bulk_sender import enviar_correos
 from core.shared.text_utils import _cell_text
 from ui.modal_run import run_with_modal
+from ui.theme import (
+    CARD_BORDER_COLOR,
+    CARD_FG_COLOR,
+    CHECKBOX_STYLE,
+    FONT_LABEL,
+    PADY_MD,
+    PADY_SM,
+)
+from ui.widgets import (
+    make_primary_button,
+    make_secondary_button,
+    make_tool_button,
+)
 
 PREVIEW_N = 5
 preview_df = None
 preview_row = None
-
-# Espaciado consistente (simple)
-PADY_SM = 6
-PADY_MD = 10
 
 LOGOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "logo"))
 LOGO_NONE_LABEL = "Ninguno"
@@ -57,11 +66,9 @@ def seleccionar_ruta_reporte():
 
 def _set_excel_controls_enabled(enabled: bool):
     state_cb = "readonly" if enabled else "disabled"
-    style_name = "Enabled.TCombobox" if enabled else "Disabled.TCombobox"
 
     for cb in (cb_hoja, cb_nombre, cb_correo, cb_archivo):
         cb.configure(state=state_cb)
-        cb.configure(style=style_name)
     
 def _toggle_reporte_ui():
     activo = (gen_excel_var.get() or gen_pdf_var.get())
@@ -89,7 +96,7 @@ def cargar_hojas_excel():
     try:
         xls = pd.ExcelFile(ruta)
         hojas = list(xls.sheet_names)
-        cb_hoja["values"] = hojas
+        cb_hoja.configure(values=hojas)
         _set_excel_controls_enabled(True)
         
         # Selección por defecto: heurística simple
@@ -125,9 +132,9 @@ def cargar_columnas_excel():
         if not cols:
             raise ValueError("El Excel no tiene columnas.")
 
-        cb_nombre["values"] = cols
-        cb_correo["values"] = cols
-        cb_archivo["values"] = cols
+        cb_nombre.configure(values=cols)
+        cb_correo.configure(values=cols)
+        cb_archivo.configure(values=cols)
 
         # Autoselección simple (heurística)
         def pick(preferencias):
@@ -183,21 +190,39 @@ def _load_preview_df(n=PREVIEW_N):
 
 
 def actualizar_tabla_preview():
-    for item in preview_tree.get_children():
-        preview_tree.delete(item)
+    if preview_box is None:
+        return
+
+    preview_box.configure(state="normal")
+    preview_box.delete("1.0", "end")
 
     if preview_df is None or preview_df.empty:
+        preview_box.insert("1.0", "(sin datos para previsualizar)")
+        preview_box.configure(state="disabled")
         return
 
     col_n = cb_nombre.get().strip()
     col_c = cb_correo.get().strip()
     col_a = cb_archivo.get().strip()
 
+    def _clip(text: str, n: int) -> str:
+        text = str(text)
+        return text if len(text) <= n else text[: n - 1] + "…"
+
+    header = f"{'#':>2} | {'Nombre':<26} | {'Correo':<30} | {'NombreArchivo':<30}"
+    sep = "-" * len(header)
+    lines = [header, sep]
+
     for idx, (_, row) in enumerate(preview_df.iterrows(), start=1):
         v_n = _cell_text(row[col_n]) if col_n and col_n in preview_df.columns else ""
         v_c = _cell_text(row[col_c]) if col_c and col_c in preview_df.columns else ""
         v_a = _cell_text(row[col_a]) if col_a and col_a in preview_df.columns else ""
-        preview_tree.insert("", "end", values=(idx, v_n, v_c, v_a))
+        lines.append(
+            f"{idx:>2} | {_clip(v_n, 26):<26} | {_clip(v_c, 30):<30} | {_clip(v_a, 30):<30}"
+        )
+
+    preview_box.insert("1.0", "\n".join(lines))
+    preview_box.configure(state="disabled")
 
 
 def actualizar_vista_previa(event=None):
@@ -227,7 +252,7 @@ def cargar_logos_predeterminados():
             logo_map[name] = os.path.join(LOGOS_DIR, f)
             opciones.append(name)
 
-    cb_logo["values"] = opciones
+    cb_logo.configure(values=opciones)
 
     # Mantener selección si existe; si no, volver a Ninguno
     actual = cb_logo.get().strip()
@@ -462,12 +487,6 @@ def abrir_modal_envio_y_ejecutar():
         messagebox.showerror("Error", str(e))
         
 
-FONT_LABEL = ("Segoe UI", 13, "bold")
-FONT_BUTTON = ("Segoe UI", 13, "bold")
-
-
-
-
 def mount(parent):
     """
     Construye la UI de envío masivo dentro de `parent` (CTkFrame o tab).
@@ -476,37 +495,31 @@ def mount(parent):
     global excel_entry, carpeta_entry, asunto_entry, mensaje_text
     global cb_hoja, cb_nombre, cb_correo, cb_archivo
     global btn_excel, btn_carpeta, btn_cargar_cols, btn_enviar
-    global preview_tree, cb_logo, lbl_logo_estado
+    global preview_box, cb_logo, lbl_logo_estado
     global gen_excel_var, gen_pdf_var, chk_excel, chk_pdf
     global reporte_entry, btn_reporte, titulo_reporte_entry
     global max_entry, delay_entry, header_row_entry
     root = parent.winfo_toplevel()
 
-    # Estilo ttk (AHORA aquí adentro)
-    style = ttk.Style()
-    
-    style.theme_use("clam")
-    style.configure("Enabled.TCombobox", fieldbackground="white", background="white", foreground="black")
-    style.map("Enabled.TCombobox",
-              fieldbackground=[("readonly", "white"), ("!disabled", "white")],
-              foreground=[("readonly", "black"), ("!disabled", "black")])
-
-    style.configure("Disabled.TCombobox", fieldbackground="#e6e6e6", background="#e6e6e6", foreground="#7a7a7a")
-    style.map("Disabled.TCombobox",
-              fieldbackground=[("disabled", "#e6e6e6")],
-              foreground=[("disabled", "#7a7a7a")])
-
-    style.configure("Treeview", rowheight=24)
-    style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))
-    style.configure("TCombobox", padding=4)
-
-    frame_main = ctk.CTkFrame(parent)
+    frame_main = ctk.CTkFrame(parent, fg_color="transparent")
     frame_main.pack(fill="both", expand=True, padx=10, pady=10)
     frame_main.columnconfigure(0, weight=1)
     frame_main.columnconfigure(1, weight=1)
-    frame_left = ctk.CTkFrame(frame_main, corner_radius=12)
+    frame_left = ctk.CTkFrame(
+        frame_main,
+        corner_radius=12,
+        fg_color=CARD_FG_COLOR,
+        border_width=1,
+        border_color=CARD_BORDER_COLOR,
+    )
     frame_left.grid(row=0, column=0, sticky="nsew", padx=(0, 10))
-    frame_right = ctk.CTkFrame(frame_main, corner_radius=12)
+    frame_right = ctk.CTkFrame(
+        frame_main,
+        corner_radius=12,
+        fg_color=CARD_FG_COLOR,
+        border_width=1,
+        border_color=CARD_BORDER_COLOR,
+    )
     frame_right.grid(row=0, column=1, sticky="nsew")
 
     # Contenedores internos con padding global (gap)
@@ -520,7 +533,7 @@ def mount(parent):
     ctk.CTkLabel(left_content, text="Archivo Excel", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
     excel_entry = ctk.CTkEntry(left_content)
     excel_entry.pack(fill="x", pady=(0, PADY_MD))
-    btn_excel = ctk.CTkButton(left_content, text="Seleccionar Excel", command=seleccionar_excel, font=FONT_BUTTON)
+    btn_excel = make_secondary_button(left_content, text="Seleccionar Excel", command=seleccionar_excel)
     btn_excel.pack(fill="x", pady=(0, PADY_MD))
 
     # --- HOJA + MAPEO (layout 2 columnas: Título | Celda) ---
@@ -536,7 +549,12 @@ def mount(parent):
     ctk.CTkLabel(excel_map_frame, text="Hoja del Excel", font=FONT_LABEL).grid(
         row=0, column=0, sticky="w", padx=(0, 12), pady=ROW_PADY
     )
-    cb_hoja = ttk.Combobox(excel_map_frame, state="disabled", style="Disabled.TCombobox")
+    cb_hoja = ctk.CTkComboBox(
+        excel_map_frame,
+        values=[],
+        state="disabled",
+        command=lambda _v: cargar_columnas_excel(),
+    )
     cb_hoja.grid(row=0, column=1, sticky="ew", pady=ROW_PADY)
 
     # (Opcional) Fila de encabezados (si la implementas)
@@ -551,61 +569,62 @@ def mount(parent):
     ctk.CTkLabel(excel_map_frame, text="Columna Nombre", font=FONT_LABEL).grid(
         row=2, column=0, sticky="w", padx=(0, 12), pady=ROW_PADY
     )
-    cb_nombre = ttk.Combobox(excel_map_frame, state="disabled", style="Disabled.TCombobox")
+    cb_nombre = ctk.CTkComboBox(
+        excel_map_frame,
+        values=[],
+        state="disabled",
+        command=actualizar_vista_previa,
+    )
     cb_nombre.grid(row=2, column=1, sticky="ew", pady=ROW_PADY)
 
     # Columna Correo
     ctk.CTkLabel(excel_map_frame, text="Columna Correo", font=FONT_LABEL).grid(
         row=3, column=0, sticky="w", padx=(0, 12), pady=ROW_PADY
     )
-    cb_correo = ttk.Combobox(excel_map_frame, state="disabled", style="Disabled.TCombobox")
+    cb_correo = ctk.CTkComboBox(
+        excel_map_frame,
+        values=[],
+        state="disabled",
+        command=actualizar_vista_previa,
+    )
     cb_correo.grid(row=3, column=1, sticky="ew", pady=ROW_PADY)
 
     # Columna NombreArchivo
     ctk.CTkLabel(excel_map_frame, text="Columna NombreArchivo", font=FONT_LABEL).grid(
         row=4, column=0, sticky="w", padx=(0, 12), pady=ROW_PADY
     )
-    cb_archivo = ttk.Combobox(excel_map_frame, state="disabled", style="Disabled.TCombobox")
+    cb_archivo = ctk.CTkComboBox(
+        excel_map_frame,
+        values=[],
+        state="disabled",
+        command=actualizar_vista_previa,
+    )
     cb_archivo.grid(row=4, column=1, sticky="ew", pady=ROW_PADY)
 
     # Botón cargar columnas (alineado a la derecha)
-    btn_cargar_cols = ctk.CTkButton(
+    btn_cargar_cols = make_secondary_button(
         excel_map_frame,
         text="Cargar columnas desde Excel",
         command=cargar_columnas_excel,
-        font=FONT_BUTTON
     )
     btn_cargar_cols.grid(row=5, column=1, sticky="e", pady=(ROW_PADY, 0))
 
-    # Vista previa (Treeview ttk)
+    # Vista previa (CTkTextbox)
     ctk.CTkLabel(left_content, text=f"Vista previa ({PREVIEW_N} filas)", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    # Nota: frame_table NO transparente para que ttk no choque con fondos
     frame_table = ctk.CTkFrame(left_content)
     frame_table.pack(fill="both", expand=True, pady=(0, PADY_MD))
-
-    columns = ("#", "Nombre", "Correo", "NombreArchivo")
-    preview_tree = ttk.Treeview(frame_table, columns=columns, show="headings", height=PREVIEW_N)
-    preview_tree.heading("#", text="#")
-    preview_tree.heading("Nombre", text="Nombre (según mapeo)")
-    preview_tree.heading("Correo", text="Correo (según mapeo)")
-    preview_tree.heading("NombreArchivo", text="NombreArchivo (según mapeo)")
-
-    preview_tree.column("#", width=40, anchor="center", stretch=False)
-    preview_tree.column("Nombre", width=150, anchor="w", stretch=True)
-    preview_tree.column("Correo", width=170, anchor="w", stretch=True)
-    preview_tree.column("NombreArchivo", width=170, anchor="w", stretch=True)
-
-    scroll_y = ttk.Scrollbar(frame_table, orient="vertical", command=preview_tree.yview)
-    preview_tree.configure(yscrollcommand=scroll_y.set)
-
-    preview_tree.pack(side="left", fill="both", expand=True, padx=(10, 6), pady=10)
-    scroll_y.pack(side="right", fill="y", padx=(0, 10), pady=10)
+    preview_box = ctk.CTkTextbox(frame_table, height=170)
+    preview_box.pack(fill="both", expand=True, padx=10, pady=10)
+    preview_box.insert("1.0", "(sin datos para previsualizar)")
+    preview_box.configure(state="disabled")
 
     # Carpeta
     ctk.CTkLabel(left_content, text="Carpeta donde están TODOS los archivos", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
     carpeta_entry = ctk.CTkEntry(left_content)
     carpeta_entry.pack(fill="x", pady=(0, PADY_MD))
-    btn_carpeta = ctk.CTkButton(left_content, text="Seleccionar carpeta", command=seleccionar_carpeta, font=FONT_BUTTON)
+    btn_carpeta = make_secondary_button(
+        left_content, text="Seleccionar carpeta", command=seleccionar_carpeta
+    )
     btn_carpeta.pack(fill="x", pady=(0, PADY_MD))
 
 
@@ -623,33 +642,32 @@ def mount(parent):
         row=0, column=0, sticky="w", padx=(0, 12), pady=6
     )
 
-    cb_logo = ttk.Combobox(frame_logo, state="readonly", style="Enabled.TCombobox")
+    cb_logo = ctk.CTkComboBox(
+        frame_logo,
+        values=[LOGO_NONE_LABEL],
+        state="readonly",
+        command=aplicar_logo_seleccionado,
+    )
     cb_logo.grid(row=0, column=1, sticky="ew", pady=6)
 
-    btn_sel_logo = ctk.CTkButton(
+    btn_sel_logo = make_tool_button(
         frame_logo,
         text="Actualizar lista",
         command=seleccionar_logo,
-        font=FONT_BUTTON,
-        width=150
+        width=150,
     )
     btn_sel_logo.grid(row=0, column=2, sticky="e", padx=(12, 0), pady=6)
 
-    btn_ins_logo = ctk.CTkButton(
+    btn_ins_logo = make_tool_button(
         frame_logo,
         text="Insertar logo",
-        command=insertar_logo,     # <-- IMPORTANTE: usar insertar_logo
-        font=FONT_BUTTON,
-        width=140
+        command=insertar_logo,
+        width=140,
     )
     btn_ins_logo.grid(row=0, column=3, sticky="e", padx=(12, 0), pady=6)
 
     lbl_logo_estado = ctk.CTkLabel(right_content, text="Logo: (ninguno)")
     lbl_logo_estado.pack(anchor="w", pady=(0, PADY_MD))
-
-    # aplicar selección al cambiar el combobox
-    cb_logo.bind("<<ComboboxSelected>>", aplicar_logo_seleccionado)
-
 
     # Asunto
     ctk.CTkLabel(right_content, text="Asunto", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
@@ -693,17 +711,33 @@ def mount(parent):
     gen_excel_var = tk.BooleanVar(master=root, value=True)
     gen_pdf_var = tk.BooleanVar(master=root, value=False)
 
-    chk_excel = ctk.CTkCheckBox(frame_checks, text="Generar registro en Excel (.xlsx)", variable=gen_excel_var, command=_toggle_reporte_ui)
+    chk_excel = ctk.CTkCheckBox(
+        frame_checks,
+        text="Generar registro en Excel (.xlsx)",
+        variable=gen_excel_var,
+        command=_toggle_reporte_ui,
+        **CHECKBOX_STYLE,
+    )
     chk_excel.pack(anchor="w", pady=(0, 6))
 
-    chk_pdf = ctk.CTkCheckBox(frame_checks, text="Generar registro en PDF (.pdf)", variable=gen_pdf_var, command=_toggle_reporte_ui)
+    chk_pdf = ctk.CTkCheckBox(
+        frame_checks,
+        text="Generar registro en PDF (.pdf)",
+        variable=gen_pdf_var,
+        command=_toggle_reporte_ui,
+        **CHECKBOX_STYLE,
+    )
     chk_pdf.pack(anchor="w")
 
     ctk.CTkLabel(right_content, text="Ruta base del informe (sin extensión)", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
     reporte_entry = ctk.CTkEntry(right_content)
     reporte_entry.pack(fill="x", pady=(0, PADY_SM))
 
-    btn_reporte = ctk.CTkButton(right_content, text="Elegir dónde guardar informe", command=seleccionar_ruta_reporte, font=FONT_BUTTON)
+    btn_reporte = make_secondary_button(
+        right_content,
+        text="Elegir dónde guardar informe",
+        command=seleccionar_ruta_reporte,
+    )
     btn_reporte.pack(fill="x", pady=(0, PADY_MD))
 
     _toggle_reporte_ui()
@@ -716,21 +750,14 @@ def mount(parent):
     titulo_reporte_entry.pack(fill="x", pady=(0, PADY_MD))
 
     # Botones
-    btn_enviar = ctk.CTkButton(
+    btn_enviar = make_primary_button(
         right_content,
         text="ENVIAR CORREOS",
         command=abrir_modal_envio_y_ejecutar,
         height=40,
-        font=FONT_BUTTON
     )
     btn_enviar.pack(fill="x", pady=(0, PADY_SM))
 
-
-    # Refresco automático del preview al cambiar combobox:
-    cb_nombre.bind("<<ComboboxSelected>>", actualizar_vista_previa)
-    cb_correo.bind("<<ComboboxSelected>>", actualizar_vista_previa)
-    cb_archivo.bind("<<ComboboxSelected>>", actualizar_vista_previa)
-    cb_hoja.bind("<<ComboboxSelected>>", lambda e: cargar_columnas_excel())
 
     _set_excel_controls_enabled(False)
     cargar_logos_predeterminados()

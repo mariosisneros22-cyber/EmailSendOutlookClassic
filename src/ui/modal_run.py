@@ -1,9 +1,9 @@
 # ui/modal_run.py
 import queue
 import threading
-import tkinter as tk
 import tkinter.messagebox as mb
 import customtkinter as ctk
+from ui.widgets import make_primary_button, make_secondary_button, make_tool_button
 
 
 def run_with_modal(
@@ -181,13 +181,13 @@ def run_with_modal(
         t.start()
         _poll_events(user_on_progress)
 
-    btn_cerrar = ctk.CTkButton(btns, text="Cerrar", command=on_close)
+    btn_cerrar = make_secondary_button(btns, text="Cerrar", command=on_close)
     btn_cerrar.pack(side="right")
 
-    btn_stop = ctk.CTkButton(btns, text="STOP", command=on_stop, state="disabled")
+    btn_stop = make_tool_button(btns, text="STOP", command=on_stop, state="disabled")
     btn_stop.pack(side="right", padx=(0, 10))
 
-    btn_iniciar = ctk.CTkButton(btns, text="Iniciar", command=iniciar)
+    btn_iniciar = make_primary_button(btns, text="Iniciar", command=iniciar, height=36)
     btn_iniciar.pack(side="right", padx=(0, 10))
 
     return modal
