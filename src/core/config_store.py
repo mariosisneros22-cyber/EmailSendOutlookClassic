@@ -1,3 +1,5 @@
+#core/config_store.py
+
 import json
 from core.app_dirs import CONFIG_PATH
 
@@ -6,7 +8,7 @@ def load_config() -> dict:
         return {}
     try:
         return json.loads(CONFIG_PATH.read_text(encoding="utf-8")) or {}
-    except Exception:
+    except json.JSONDecodeError:
         return {}
     
 def save_config(data:dict) -> None:

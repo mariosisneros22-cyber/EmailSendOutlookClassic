@@ -6,7 +6,7 @@ import os
 APP_NAME = "AppCorreo"
 
 def data_dir() ->Path:
-    base = os.environ.get("APPDATA") or os.path.expanduser("~")
+    base = Path(os.environ.get("APPDATA", Path.home()))
     p = Path(base) / APP_NAME / "data"
     p.mkdir(parents=True, exist_ok=True)
     return p
@@ -19,5 +19,5 @@ def responder_control_path()->Path:
 
 
 
-CONFIG_PATH=config_path()
-RESPONDER_CONTROL_PATH=responder_control_path()
+CONFIG_PATH = config_path()
+RESPONDER_CONTROL_PATH = responder_control_path()

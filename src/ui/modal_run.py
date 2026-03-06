@@ -58,22 +58,26 @@ def run_with_modal(
 
     def on_close():
         if enviando["flag"]:
-            return
+            on_stop()          # solicita cancelación
+            return             # no destruyas aún
         modal.destroy()
 
     modal.protocol("WM_DELETE_WINDOW", on_close)
 
     def on_stop():
-        stop_event.set()
-        status_lbl.configure(text="Cancelando...")
+        if stop_event.is_set():
+            status_lbl.configure(text="Cancelando...")
+            return
 
     def _on_progress(i, total, estado, *extras):
         count_lbl.configure(text=f"{i} / {total}")
+        
         try:
             frac = float(i) / float(total or 1)
-            modal_progress.set(max(0.0, min(1.0, frac)))
-        except Exception:
-            pass
+        except (TypeError, ValueError, ZeroDivisionError):
+            frac = 0.0
+            
+        modal_progress.set(max(0.0, min(1.0, frac)))
         est = (str(estado) or "").strip().lower()
         if est.startswith("error"):
             status_lbl.configure(text=f"Error en {i}/{total}")
@@ -108,6 +112,8 @@ def run_with_modal(
         status_lbl.configure(text="Error.")
 
     def _poll_events(user_on_progress):
+        if not modal.winfo_exists():
+            return
         try:
             while True:
                 kind, payload = event_queue.get_nowait()
@@ -117,8 +123,9 @@ def run_with_modal(
                     if callable(user_on_progress):
                         try:
                             user_on_progress(i, total_i, estado, *extras)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # opcional: no romper el envío, pero deja rastro
+                            print(f"user_on_progress falló: {e}")
                 elif kind == "done_ok":
                     _finish_ok(payload)
                     return

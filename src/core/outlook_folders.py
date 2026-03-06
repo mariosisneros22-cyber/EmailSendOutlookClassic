@@ -17,33 +17,33 @@ def load_selected_folder_ids():
 
 def pick_outlook_folder_and_save():
     outlook = get_outlook_app()
-    if outlook is None:
-        raise RuntimeError("No se pudo acceder a Outlook.")
     ns = outlook.GetNamespace("MAPI")
+
     folder = ns.PickFolder()
     if folder is None:
         return None
+
     save_selected_folder(folder.StoreID, folder.EntryID)
     return folder
 
+
 def get_saved_outlook_folder():
     outlook = get_outlook_app()
-    if outlook is None:
-        return None
     ns = outlook.GetNamespace("MAPI")
+
     store_id, entry_id = load_selected_folder_ids()
     if not store_id or not entry_id:
         return None
-    return ns.GetFolderFromID(entry_id, store_id)
 
+    try:
+        return ns.GetFolderFromID(entry_id, store_id)
+    except Exception:
+        # Folder ya no existe / permisos / EntryID inválido
+        return None
 # EXTRA
 def get_or_create_subfolder(parent_folder, name:str):
     #Outlook Folders collection: parent_folder.Folders
     for f in parent_folder.Folders:
-        try:
-            if f.Name == name:
-                return f
-        except Exception: 
-            continue
+        if f.Name == name:
+            return f
     return parent_folder.Folders.Add(name)
-

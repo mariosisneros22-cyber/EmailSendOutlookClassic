@@ -17,7 +17,7 @@ from core.common import (
 )
 from core.outlook_client import get_outlook_app
 
-from reports.report_pdf import PDF_DISPONIBLE, generar_pdf_registro
+from reports.report_pdf import generar_pdf_registro
 
 # Tamaño único para TODOS (email/excel/pdf)
 LOGO_H_PX = 60
@@ -31,19 +31,14 @@ def _logo_size_keep_height_px(path: str, target_h_px: int) -> tuple[int, int]:
     Retorna (w_px, h_px) manteniendo proporción con altura fija target_h_px.
     Usa Pillow si está disponible; si no, cae a 200px de ancho por defecto.
     """
-    try:
-        from PIL import Image
+    from PIL import Image
 
-        with Image.open(path) as im:
-            w0, h0 = im.size
-        if not w0 or not h0:
-            return (200, target_h_px)
-        w = int(round(target_h_px * (w0 / h0)))
-        return (max(1, w), target_h_px)
-    except Exception:
-        # fallback si no hay Pillow
+    with Image.open(path) as im:
+        w0, h0 = im.size
+    if not w0 or not h0:
         return (200, target_h_px)
-
+    w = int(round(target_h_px * (w0 / h0)))
+    return (max(1, w), target_h_px)
 
 def _prepare_logo_fixed_height(logo_path: str, target_h_px: int) -> str:
     """
@@ -53,7 +48,7 @@ def _prepare_logo_fixed_height(logo_path: str, target_h_px: int) -> str:
     """
     try:
         from PIL import Image
-    except Exception:
+    except ImportError:
         return logo_path  # fallback (no garantiza tamaño)
 
     with Image.open(logo_path) as im:
@@ -109,11 +104,6 @@ def enviar_correos(
     ):
         raise ValueError("Selecciona dónde guardar el informe (ruta base).")
 
-    if generar_pdf and not PDF_DISPONIBLE:
-        raise RuntimeError(
-            "Para generar PDF necesitas reportlab: pip install reportlab"
-        )
-
     # Leer la hoja seleccionada
     _asegurar_leible(ruta_excel)
     df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
@@ -145,6 +135,7 @@ def enviar_correos(
 
     logo_for_use = None
     logo_tmp_to_cleanup = None
+    temp_adjuntos = []
 
     try:
         if logo_path and os.path.isfile(logo_path):
@@ -161,7 +152,7 @@ def enviar_correos(
 
         registros = []
         cancelado = False
-        temp_adjuntos = []
+       
 
         for i, (_, fila) in enumerate(df.iterrows(), start=1):
             if callable(is_cancelled) and is_cancelled():
@@ -226,9 +217,6 @@ def enviar_correos(
                         "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
                     )
 
-                    # Como ya lo redimensionaste, saca tamaño real del archivo preparado:
-                    w_px, h_px = _logo_size_keep_height_px(logo_for_use, LOGO_H_PX)
-
                     body_html += (
                         "<br><br>"
                         f"<img src='cid:{cid}' height='{LOGO_H_PX}' style='width:auto;display:block;border:0;'/>"
@@ -264,7 +252,7 @@ def enviar_correos(
                 try:
                     on_progress(i, total, estado, nombre, correo)
                 except Exception:
-                    pass
+                    print(f"on_progress falló: {e}")
 
             _progress_set(progress, i)
             if root is not None:
@@ -431,13 +419,13 @@ def enviar_correos(
         if logo_tmp_to_cleanup and os.path.isfile(logo_tmp_to_cleanup):
             try:
                 os.remove(logo_tmp_to_cleanup)
-            except Exception:
+            except OSError:
                 pass
 
         # limpia adjuntos temporales copiados
-        try:
-            for p in temp_adjuntos:
-                if p and os.path.isfile(p):
+        for p in temp_adjuntos:
+            if p and os.path.isfile(p):
+                try:
                     os.remove(p)
-        except Exception:
-            pass
+                except OSError:
+                    pass

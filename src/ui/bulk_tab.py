@@ -6,7 +6,7 @@ import pandas as pd
 import customtkinter as ctk
 import os, shutil
 
-from mailer import enviar_correos
+from core.bulk_sender import enviar_correos
 from core.common import _cell_text
 from ui.modal_run import run_with_modal
 
@@ -49,8 +49,8 @@ def seleccionar_ruta_reporte():
         filetypes=[("Base (sin extensión)", "*.*")]
     )
     if path:
-        base, ext = path.rsplit(".", 1) if "." in path and len(path.split(".")) > 1 else (path, "")
-        if ext.lower() in ("xlsx", "pdf", "docx"):
+        base, ext = os.path.splitext(path)
+        if ext.lower() in (".xlsx", ".pdf", ".docx"):
             path = base
         reporte_entry.delete(0, tk.END)
         reporte_entry.insert(0, path)
@@ -79,8 +79,7 @@ def _get_header_index() -> int:
         if n <= 0:
             raise ValueError
         return n - 1
-    except Exception:
-        # fallback seguro
+    except (ValueError, TypeError):
         return 0
     
 def cargar_hojas_excel():
@@ -177,9 +176,10 @@ def _load_preview_df(n=PREVIEW_N):
             return
         preview_df = dfp
         preview_row = dfp.iloc[0].to_dict()
-    except Exception:
+    except Exception as e:
         preview_df = None
         preview_row = None
+        print(f"Preview error: {e}")  # opcional
 
 
 def actualizar_tabla_preview():
@@ -204,10 +204,6 @@ def actualizar_vista_previa(event=None):
     col_n = cb_nombre.get().strip()
     col_c = cb_correo.get().strip()
     col_a = cb_archivo.get().strip()
-
-    _ = _cell_text(preview_row.get(col_n, "")) if col_n and preview_row else ""
-    _ = _cell_text(preview_row.get(col_c, "")) if col_c and preview_row else ""
-    _ = _cell_text(preview_row.get(col_a, "")) if col_a and preview_row else ""
 
     actualizar_tabla_preview()
 
@@ -278,7 +274,6 @@ def insertar_logo():
     cargar_logos_predeterminados()
     new_display_name = os.path.splitext(os.path.basename(dest))[0]
     if new_display_name in logo_map:
-        cb_logo.set(new_display_name)
         # aplicar selección inmediatamente
         cb_logo.set(new_display_name)
         aplicar_logo_seleccionado()
@@ -344,7 +339,6 @@ def abrir_modal_envio_y_ejecutar():
     - Usa progressbar dentro del modal
     - Usa STOP con cancelación cooperativa
     """
-    # ---------- Validaciones rápidas (reusa lo que ya tienes) ----------
     ruta_excel = excel_entry.get().strip()
     carpeta = carpeta_entry.get().strip()
     asunto = asunto_entry.get().strip()
@@ -366,34 +360,62 @@ def abrir_modal_envio_y_ejecutar():
         messagebox.showerror("Error", "Selecciona las 3 columnas: Nombre, Correo y NombreArchivo.")
         return
 
+    # ---- parse numéricos: captura específica ----
     try:
         max_envios = int(max_entry.get().strip())
-        if max_envios <= 0:
-            raise ValueError
-    except Exception:
+    except (ValueError, TypeError):
+        messagebox.showerror("Error", "El 'Máximo por ejecución' debe ser un entero > 0.")
+        return
+    if max_envios <= 0:
         messagebox.showerror("Error", "El 'Máximo por ejecución' debe ser un entero > 0.")
         return
 
     try:
         delay = float(delay_entry.get().strip())
-        if delay < 0:
-            raise ValueError
-    except Exception:
+    except (ValueError, TypeError):
+        messagebox.showerror("Error", "El 'Delay (segundos)' debe ser un número >= 0.")
+        return
+    if delay < 0:
         messagebox.showerror("Error", "El 'Delay (segundos)' debe ser un número >= 0.")
         return
 
-    # Si todavía NO implementaste selector de hoja, deja hoja_excel = 0
     hoja_excel = cb_hoja.get().strip() if cb_hoja.get().strip() else 0
+    header_idx = _get_header_index()
 
-    # Calcular total para mostrar en el modal (y validar el límite)
+    # ---- si reporte está activo, exige ruta ----
+    gen_excel = bool(gen_excel_var.get())
+    gen_pdf = bool(gen_pdf_var.get())
+    ruta_base_reporte = reporte_entry.get().strip() if (gen_excel or gen_pdf) else None
+
+    if (gen_excel or gen_pdf) and not ruta_base_reporte:
+        messagebox.showerror("Error", "Elige la 'Ruta base del informe (sin extensión)'.")
+        return
+
+    report_title = titulo_reporte_entry.get().strip()
+
+    # ---- calcular total sin cargar todo el Excel ----
     try:
-        header_idx = _get_header_index()
-        df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
-        total = len(df)
+        df_head = pd.read_excel(
+            ruta_excel,
+            sheet_name=hoja_excel,
+            header=header_idx,
+            usecols=[col_nombre, col_correo, col_archivo],
+        )
+    except ValueError as e:
+        # ValueError típico: hoja no existe / usecols no coincide
+        messagebox.showerror("Error", f"No se pudo leer el Excel (hoja/columnas):\n{e}")
+        return
+    except FileNotFoundError:
+        messagebox.showerror("Error", "No se encontró el archivo Excel seleccionado.")
+        return
+    except PermissionError:
+        messagebox.showerror("Error", "No se pudo abrir el Excel (archivo en uso o sin permisos).")
+        return
     except Exception as e:
         messagebox.showerror("Error", f"No se pudo leer el Excel:\n{e}")
         return
 
+    total = len(df_head)
     if total <= 0:
         messagebox.showerror("Error", "El Excel no tiene filas.")
         return
@@ -410,9 +432,9 @@ def abrir_modal_envio_y_ejecutar():
         carpeta_archivos=carpeta,
         asunto=asunto,
         mensaje=mensaje,
-        ruta_base_reporte=reporte_entry.get().strip() if (gen_excel_var.get() or gen_pdf_var.get()) else None,
-        generar_excel=gen_excel_var.get(),
-        generar_pdf=gen_pdf_var.get(),
+        ruta_base_reporte=ruta_base_reporte,
+        generar_excel=gen_excel,
+        generar_pdf=gen_pdf,
         max_por_ejecucion=max_envios,
         delay_segundos=delay,
         pedir_confirmacion=False,
@@ -420,9 +442,9 @@ def abrir_modal_envio_y_ejecutar():
         col_correo=col_correo,
         col_archivo=col_archivo,
         hoja_excel=hoja_excel,
-        header_idx=_get_header_index(),
+        header_idx=header_idx,  # usa el ya calculado
         logo_path=selected_logo_path,
-        report_title=titulo_reporte_entry.get().strip(),
+        report_title=report_title,
         show_summary_messagebox=False,
     )
 
@@ -462,19 +484,17 @@ def mount(parent):
 
     # Estilo ttk (AHORA aquí adentro)
     style = ttk.Style()
-    try:
-        style.theme_use("clam")
-        style.configure("Enabled.TCombobox", fieldbackground="white", background="white", foreground="black")
-        style.map("Enabled.TCombobox",
-                  fieldbackground=[("readonly", "white"), ("!disabled", "white")],
-                  foreground=[("readonly", "black"), ("!disabled", "black")])
+    
+    style.theme_use("clam")
+    style.configure("Enabled.TCombobox", fieldbackground="white", background="white", foreground="black")
+    style.map("Enabled.TCombobox",
+              fieldbackground=[("readonly", "white"), ("!disabled", "white")],
+              foreground=[("readonly", "black"), ("!disabled", "black")])
 
-        style.configure("Disabled.TCombobox", fieldbackground="#e6e6e6", background="#e6e6e6", foreground="#7a7a7a")
-        style.map("Disabled.TCombobox",
-                  fieldbackground=[("disabled", "#e6e6e6")],
-                  foreground=[("disabled", "#7a7a7a")])
-    except Exception:
-        pass
+    style.configure("Disabled.TCombobox", fieldbackground="#e6e6e6", background="#e6e6e6", foreground="#7a7a7a")
+    style.map("Disabled.TCombobox",
+              fieldbackground=[("disabled", "#e6e6e6")],
+              foreground=[("disabled", "#7a7a7a")])
 
     style.configure("Treeview", rowheight=24)
     style.configure("Treeview.Heading", font=("Segoe UI", 10, "bold"))

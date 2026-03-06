@@ -1,25 +1,20 @@
-# reportes.py
-try:
-    from reportlab.platypus import (
-        SimpleDocTemplate,
-        Table,
-        TableStyle,
-        Paragraph,
-        Spacer,
-        KeepInFrame,
-        PageBreak,
-    )
-    from reportlab.lib.pagesizes import A4, landscape
-    from reportlab.lib.colors import black, lightgrey
-    from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
-    from reportlab.platypus import Image as RLImage
-    from reportlab.lib.utils import ImageReader
-    from reportlab.lib.enums import TA_CENTER
-    import os
+import os
 
-    PDF_DISPONIBLE = True
-except Exception:
-    PDF_DISPONIBLE = False
+from reportlab.platypus import (
+    SimpleDocTemplate,
+    Table,
+    TableStyle,
+    Paragraph,
+    Spacer,
+    KeepInFrame,
+    PageBreak,
+)
+from reportlab.lib.pagesizes import A4, landscape
+from reportlab.lib.colors import black, lightgrey
+from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
+from reportlab.platypus import Image as RLImage
+from reportlab.lib.utils import ImageReader
+from reportlab.lib.enums import TA_CENTER
 
 
 def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, float]:
@@ -36,15 +31,10 @@ def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, flo
 
 def generar_pdf_registro(
     registros,
-    ruta_pdf,
+    ruta_pdf: str,
     logo_path: str | None = None,
     report_title: str = "Registro de envío de correos",
 ):
-    if not PDF_DISPONIBLE:
-        raise RuntimeError(
-            "No está instalado reportlab. Instala con: pip install reportlab"
-        )
-
     enviados = [
         r for r in registros if str(r.get("Estado", "")).strip().lower() == "enviado"
     ]
@@ -101,12 +91,12 @@ def generar_pdf_registro(
 
         available_width = doc.width
         col_widths = [
-            available_width * 0.06,  # N°
-            available_width * 0.14,  # Nombre
-            available_width * 0.20,  # Correo
-            available_width * 0.10,  # Fecha
-            available_width * 0.08,  # Hora
-            available_width * 0.22,  # Estado
+            available_width * 0.06,
+            available_width * 0.14,
+            available_width * 0.20,
+            available_width * 0.10,
+            available_width * 0.08,
+            available_width * 0.22,
         ]
 
         t = Table(data, repeatRows=1, colWidths=col_widths)
@@ -125,31 +115,28 @@ def generar_pdf_registro(
         return t
 
     elementos = []
-    # Tamaño único (mismo que mailer.py)
+
+    # Tamaño único (mismo que bulk_sender)
     LOGO_H_PX = 60
-    LOGO_H_PT = LOGO_H_PX * 72 / 96  # 96dpi -> points
+    LOGO_H_PT = LOGO_H_PX * 72 / 96
 
-    # --- Header: logo izquierda + título centrado (misma fila) ---
-    header_h = LOGO_H_PT  # altura del header según el logo
-    logo_flowable = Spacer(1, header_h)  # placeholder si no hay logo
+    header_h = LOGO_H_PT
+    has_logo = bool(logo_path) and os.path.isfile(logo_path)
 
-    if logo_path and os.path.isfile(logo_path):
+    logo_flowable = Spacer(1, header_h)
+    w_pt = header_h * 2.5  # default razonable para la columna del logo
+
+    if has_logo:
         w_pt, h_pt = _logo_size_keep_height_pt(logo_path, LOGO_H_PT)
         logo_flowable = RLImage(logo_path, width=w_pt, height=h_pt)
 
     titulo_txt = (report_title or "").strip() or "Registro de envío de correos"
     titulo = Paragraph(titulo_txt, title_style)
-
-    # Mantener el título dentro del ancho disponible y centrado
-    # (evita que se “desplace” raro si el título es largo)
     titulo_box = KeepInFrame(
         doc.width, header_h, [titulo], hAlign="CENTER", vAlign="MIDDLE"
     )
 
-    # Anchos: col logo = ancho real del logo (o un mínimo), col título = resto
-    logo_col_w = w_pt if (logo_path and os.path.isfile(logo_path)) else header_h * 2.5
-    logo_col_w = max(80, float(logo_col_w))  # mínimo razonable
-
+    logo_col_w = max(80.0, float(w_pt))
     header_tbl = Table(
         [[logo_flowable, titulo_box]],
         colWidths=[logo_col_w, doc.width - logo_col_w],
@@ -159,8 +146,8 @@ def generar_pdf_registro(
         TableStyle(
             [
                 ("VALIGN", (0, 0), (-1, -1), "MIDDLE"),
-                ("ALIGN", (0, 0), (0, 0), "LEFT"),  # logo
-                ("ALIGN", (1, 0), (1, 0), "CENTER"),  # título
+                ("ALIGN", (0, 0), (0, 0), "LEFT"),
+                ("ALIGN", (1, 0), (1, 0), "CENTER"),
                 ("LEFTPADDING", (0, 0), (-1, -1), 0),
                 ("RIGHTPADDING", (0, 0), (-1, -1), 0),
                 ("TOPPADDING", (0, 0), (-1, -1), 0),
@@ -174,18 +161,12 @@ def generar_pdf_registro(
 
     elementos.append(Paragraph(f"Enviados ({len(enviados)})", section_style))
     elementos.append(Spacer(1, 4))
-    if enviados:
-        elementos.append(build_table(enviados))
-    else:
-        elementos.append(Paragraph("(sin registros)", styles["Normal"]))
+    elementos.append(build_table(enviados) if enviados else Paragraph("(sin registros)", styles["Normal"]))
 
-    elementos.append(PageBreak())  # romper pagina
+    elementos.append(PageBreak())
 
     elementos.append(Paragraph(f"Errores ({len(errores)})", section_style))
     elementos.append(Spacer(1, 4))
-    if errores:
-        elementos.append(build_table(errores))
-    else:
-        elementos.append(Paragraph("(sin registros)", styles["Normal"]))
+    elementos.append(build_table(errores) if errores else Paragraph("(sin registros)", styles["Normal"]))
 
     doc.build(elementos)

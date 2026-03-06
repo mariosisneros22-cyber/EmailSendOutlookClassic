@@ -1,5 +1,7 @@
 # ui/responder_tab.py
 import os
+import queue
+import threading
 from datetime import datetime
 from tkinter import filedialog, messagebox
 
@@ -23,7 +25,6 @@ PAD_INNER = 14
 GAP_SM = 6
 GAP_MD = 10
 
-# Tipografía: más legible (usuarios)
 FONT_TITLE = ("Segoe UI", 18, "bold")
 FONT_SECTION = ("Segoe UI", 14, "bold")
 FONT_BODY = ("Segoe UI", 13)
@@ -36,12 +37,6 @@ H_PRIMARY = 46
 H_SECONDARY = 36
 H_TOOL = 30
 
-
-# -----------------------
-# Styles (colores por jerarquía)
-# Nota: tu app usa appearance_mode="System".
-# Estos colores son tuples (light, dark) para mantener contraste.
-# -----------------------
 BTN_PRIMARY = dict(
     fg_color=("#2563eb", "#2563eb"),
     hover_color=("#1d4ed8", "#1d4ed8"),
@@ -62,25 +57,24 @@ BTN_TOOL = dict(
     text_color=("#111111", "#eaeaea"),
 )
 
-LABEL_COLOR = dict(
-    text_color=("#111111", "#eaeaea")
-)
+LABEL_COLOR = dict(text_color=("#111111", "#eaeaea"))
 
 
 # -----------------------
 # Helpers
 # -----------------------
-def _open_file(path: str):
+def _open_file(path: str) -> None:
     path = os.path.abspath(path)
     if not os.path.exists(path):
         raise FileNotFoundError(path)
     os.startfile(path)  # noqa: S606
 
 
-def _safe_folder_name(folder):
+def _safe_folder_name(folder) -> str:
     try:
         return str(folder.Name)
     except Exception:
+        # COM a veces falla al leer Name
         return "(carpeta seleccionada)"
 
 
@@ -89,10 +83,6 @@ def _now_ts() -> str:
 
 
 def _section(parent, title: str) -> ctk.CTkFrame:
-    """
-    Card con borde + fondo para diferenciar secciones incluso en dark mode.
-    Devuelve el body donde se colocan controles.
-    """
     card = ctk.CTkFrame(
         parent,
         corner_radius=12,
@@ -116,27 +106,15 @@ def _section(parent, title: str) -> ctk.CTkFrame:
 # Main mount
 # -----------------------
 def mount(parent):
-    """
-    Tab: RESPONDER (cola / control)
-    - Elegir carpeta Outlook
-    - Elegir carpeta adjuntos
-    - Actualizar cola -> control.xlsx
-    - Generar sugeridos / aplicar sugerido
-    - Procesar pendientes (ReplyAll + adjunto)
-    - Log opcional (colapsable)
-    """
     root = parent.winfo_toplevel()
 
     frame = ctk.CTkFrame(parent, fg_color="transparent")
     frame.pack(fill="both", expand=True, padx=PAD_OUTER, pady=PAD_OUTER)
 
-    # ---------- Header ----------
     header = ctk.CTkFrame(frame, fg_color="transparent")
     header.pack(fill="x", pady=(0, GAP_MD))
-
     ctk.CTkLabel(header, text="Responder (cola masiva)", font=FONT_TITLE, **LABEL_COLOR).pack(anchor="w")
 
-    # Estado (variables)
     status_var = ctk.StringVar(value="Carpeta Outlook: (no seleccionada)")
     attachments_var = ctk.StringVar(value="Carpeta adjuntos: (no seleccionada)")
     ui_status_var = ctk.StringVar(value="Estado: Listo")
@@ -158,10 +136,7 @@ def mount(parent):
     log_box = ctk.CTkTextbox(log_body, height=180)
 
     def _log_clear():
-        try:
-            log_box.delete("1.0", "end")
-        except Exception:
-            pass
+        log_box.delete("1.0", "end")
 
     def _log_show():
         if log_visible.get():
@@ -176,35 +151,24 @@ def mount(parent):
         if not log_visible.get():
             return
         log_visible.set(False)
-        try:
-            log_card.pack_forget()
-        except Exception:
-            pass
+        log_card.pack_forget()
 
     def _log_toggle():
-        if log_visible.get():
-            _log_hide()
-        else:
-            _log_show()
+        _log_hide() if log_visible.get() else _log_show()
 
     def log(msg: str):
-        """
-        Logger usado por procesos largos.
-        - Si el log está oculto, solo lo abre automáticamente en errores.
-        """
+        s = str(msg).strip()
+        is_error = s.lower().startswith("error") or s.lower().startswith("exception")
+        if is_error:
+            _log_show()
         try:
-            s = str(msg).strip()
-            is_error = s.lower().startswith("error") or s.lower().startswith("exception")
-            if is_error:
-                _log_show()
-
             log_box.insert("end", f"[{_now_ts()}] {s}\n")
             log_box.see("end")
             log_box.update_idletasks()
         except Exception:
+            # UI-only: no romper procesos por error de render
             pass
 
-    # Header del log (con botones pequeños)
     ctk.CTkLabel(log_hdr, text="Log (detalle)", font=FONT_SECTION, **LABEL_COLOR).pack(side="left")
 
     btn_hide = ctk.CTkButton(
@@ -218,30 +182,111 @@ def mount(parent):
     btn_clear.pack(side="right", padx=(GAP_SM, 0))
 
     # -----------------------
+    # Busy state (disable UI)
+    # -----------------------
+    busy = {"flag": False}
+
+    def _set_busy(is_busy: bool):
+        busy["flag"] = bool(is_busy)
+        state = "disabled" if is_busy else "normal"
+        tool_state = "disabled" if is_busy else "normal"
+
+        # Botones principales
+        btn_pick_outlook.configure(state=tool_state)
+        btn_pick_attach.configure(state=tool_state)
+
+        btn_update.configure(state=state)
+        btn_open.configure(state=state)
+        btn_process.configure(state=state)
+
+        # Tools
+        btn_suggest.configure(state=tool_state)
+        btn_apply.configure(state=tool_state)
+        btn_show_log.configure(state=tool_state)
+
+    # -----------------------
+    # Thread runner helper (no UI freeze)
+    # -----------------------
+    event_q: queue.Queue = queue.Queue()
+
+    def _poll_events():
+        try:
+            while True:
+                kind, payload = event_q.get_nowait()
+                if kind == "log":
+                    log(payload)
+                elif kind == "status":
+                    ui_status_var.set(payload)
+                elif kind == "done_ok":
+                    _set_busy(False)
+                    ui_status_var.set(payload.get("ui_status", "Estado: Listo"))
+                    msg = payload.get("messagebox_info")
+                    if msg:
+                        messagebox.showinfo(payload.get("title", "Listo"), msg)
+                elif kind == "done_err":
+                    _set_busy(False)
+                    ui_status_var.set("Estado: Error")
+                    log(f"ERROR: {payload}")
+                    messagebox.showerror("Error", str(payload))
+        except queue.Empty:
+            pass
+
+        if frame.winfo_exists():
+            frame.after(100, _poll_events)
+
+    _poll_events()
+
+    def _run_in_thread(fn, *, ui_start_status: str, ok_title: str | None = None, ok_msg: str | None = None):
+        if busy["flag"]:
+            return
+
+        _set_busy(True)
+        ui_status_var.set(ui_start_status)
+
+        def worker():
+            try:
+                result = fn()
+                payload = {"ui_status": "Estado: Listo"}
+                if ok_title or ok_msg:
+                    payload["title"] = ok_title or "Listo"
+                    payload["messagebox_info"] = ok_msg
+                event_q.put(("done_ok", payload))
+                return result
+            except Exception as e:
+                event_q.put(("done_err", e))
+                return None
+
+        threading.Thread(target=worker, daemon=True).start()
+
+    # -----------------------
     # State refresh
     # -----------------------
     def refresh_status():
         # Outlook folder
         try:
             folder = get_saved_outlook_folder()
-            if folder is None:
-                status_var.set("Carpeta Outlook: (no seleccionada)")
-            else:
-                status_var.set(f"Carpeta Outlook: {_safe_folder_name(folder)}")
         except Exception:
-            status_var.set("Carpeta Outlook: (error al leer configuración)")
+            folder = None
+
+        if folder is None:
+            status_var.set("Carpeta Outlook: (no seleccionada)")
+        else:
+            status_var.set(f"Carpeta Outlook: {_safe_folder_name(folder)}")
 
         # Attachments folder
         try:
             p = get_attachments_folder()
-            attachments_var.set(f"Carpeta adjuntos: {p}" if p else "Carpeta adjuntos: (no seleccionada)")
         except Exception:
-            attachments_var.set("Carpeta adjuntos: (error al leer la configuración)")
+            p = None
+
+        attachments_var.set(f"Carpeta adjuntos: {p}" if p else "Carpeta adjuntos: (no seleccionada)")
 
     # -----------------------
     # Actions (callbacks)
     # -----------------------
     def on_pick_folder():
+        if busy["flag"]:
+            return
         try:
             ui_status_var.set("Estado: Seleccionando carpeta Outlook…")
             folder = pick_outlook_folder_and_save()
@@ -257,6 +302,8 @@ def mount(parent):
             messagebox.showerror("Error", str(e))
 
     def on_pick_attachments_folder():
+        if busy["flag"]:
+            return
         try:
             ui_status_var.set("Estado: Seleccionando carpeta de adjuntos…")
             path = filedialog.askdirectory(title="Selecciona la carpeta de adjuntos (PDF/archivos)")
@@ -273,28 +320,29 @@ def mount(parent):
             messagebox.showerror("Error", str(e))
 
     def on_update_queue():
-        try:
-            refresh_status()
-            folder = get_saved_outlook_folder()
-            if folder is None:
-                messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
-                return
+        refresh_status()
+        folder = get_saved_outlook_folder()
+        if folder is None:
+            messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
+            return
 
-            ui_status_var.set("Estado: Actualizando cola…")
-            log("Actualizando cola desde Outlook…")
-            root.update_idletasks()
+        def job():
+            event_q.put(("status", "Estado: Actualizando cola…"))
+            event_q.put(("log", "Actualizando cola desde Outlook…"))
+            n = update_control_from_outlook()
+            event_q.put(("log", f"Listo. Se agregaron {n} conversaciones nuevas."))
+            event_q.put(("done_ok", {
+                "ui_status": f"Estado: Cola actualizada (+{n})",
+                "title": "Actualización completada",
+                "messagebox_info": f"Se agregaron {n} conversaciones nuevas.\n\n{CONTROL_PATH}",
+            }))
 
-            n = update_control_from_outlook()  # puede demorar
-
-            log(f"Listo. Se agregaron {n} conversaciones nuevas.")
-            ui_status_var.set(f"Estado: Cola actualizada (+{n})")
-            messagebox.showinfo("Actualización completada", f"Se agregaron {n} conversaciones nuevas.\n\n{CONTROL_PATH}")
-        except Exception as e:
-            ui_status_var.set("Estado: Error")
-            log(f"ERROR: {e}")
-            messagebox.showerror("Error", str(e))
+        _set_busy(True)
+        threading.Thread(target=job, daemon=True).start()
 
     def on_open_control():
+        if busy["flag"]:
+            return
         try:
             ui_status_var.set("Estado: Abriendo control.xlsx…")
             _open_file(CONTROL_PATH)
@@ -305,69 +353,74 @@ def mount(parent):
             messagebox.showerror("Error", str(e))
 
     def on_fill_suggested():
-        try:
-            ui_status_var.set("Estado: Generando sugeridos…")
-            log("Generando nombre_sugerido desde subject…")
+        def job():
+            event_q.put(("status", "Estado: Generando sugeridos…"))
+            event_q.put(("log", "Generando nombre_sugerido desde subject…"))
             n = fill_suggested_names(year_mode="current", only_if_empty=True)
-            log(f"Listo. Se generaron/actualizaron {n} sugeridos.")
-            ui_status_var.set(f"Estado: Sugeridos listos ({n})")
-            messagebox.showinfo("Listo", f"Sugeridos generados: {n}\n\n{CONTROL_PATH}")
-        except Exception as e:
-            ui_status_var.set("Estado: Error")
-            log(f"ERROR sugeridos: {e}")
-            messagebox.showerror("Error", str(e))
+            event_q.put(("log", f"Listo. Se generaron/actualizaron {n} sugeridos."))
+            event_q.put(("done_ok", {
+                "ui_status": f"Estado: Sugeridos listos ({n})",
+                "title": "Listo",
+                "messagebox_info": f"Sugeridos generados: {n}\n\n{CONTROL_PATH}",
+            }))
+
+        _set_busy(True)
+        threading.Thread(target=job, daemon=True).start()
 
     def on_apply_suggested():
-        try:
-            ui_status_var.set("Estado: Aplicando sugeridos…")
-            log("Copiando nombre_sugerido → nombre_archivo…")
+        def job():
+            event_q.put(("status", "Estado: Aplicando sugeridos…"))
+            event_q.put(("log", "Copiando nombre_sugerido → nombre_archivo…"))
             n = apply_suggested_to_nombre_archivo(only_if_empty=True, add_pdf_ext=False)
-            log(f"Listo. Se copiaron {n} valores a nombre_archivo.")
-            ui_status_var.set(f"Estado: NombreArchivo actualizado ({n})")
-            messagebox.showinfo("Listo", f"Copiados a nombre_archivo: {n}\n\n{CONTROL_PATH}")
-        except Exception as e:
-            ui_status_var.set("Estado: Error")
-            log(f"ERROR copiar sugerido: {e}")
-            messagebox.showerror("Error", str(e))
+            event_q.put(("log", f"Listo. Se copiaron {n} valores a nombre_archivo."))
+            event_q.put(("done_ok", {
+                "ui_status": f"Estado: NombreArchivo actualizado ({n})",
+                "title": "Listo",
+                "messagebox_info": f"Copiados a nombre_archivo: {n}\n\n{CONTROL_PATH}",
+            }))
+
+        _set_busy(True)
+        threading.Thread(target=job, daemon=True).start()
 
     def on_process_pending():
-        try:
-            refresh_status()
+        refresh_status()
 
-            folder = get_saved_outlook_folder()
-            if folder is None:
-                messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
-                return
+        folder = get_saved_outlook_folder()
+        if folder is None:
+            messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
+            return
 
-            attach_dir = get_attachments_folder()
-            if not attach_dir:
-                messagebox.showerror("Error", "Primero elige la carpeta de adjuntos.")
-                return
+        attach_dir = get_attachments_folder()
+        if not attach_dir:
+            messagebox.showerror("Error", "Primero elige la carpeta de adjuntos.")
+            return
 
-            ui_status_var.set("Estado: Procesando pendientes…")
-            log("Procesando pendientes…")
+        def job():
+            event_q.put(("status", "Estado: Procesando pendientes…"))
+            event_q.put(("log", "Procesando pendientes…"))
 
             n = process_pending_responses(
                 carpeta_archivos=attach_dir,
                 html_body=None,
                 delay_segundos=1.0,
                 only_first_n=None,
-                logger=log,
+                logger=lambda s: event_q.put(("log", s)),
             )
 
-            log(f"Listo. Procesados OK: {n}")
-            ui_status_var.set(f"Estado: Terminado (OK: {n})")
-            messagebox.showinfo("Terminado", f"Procesados OK: {n}\n\nRevisa el Excel:\n{CONTROL_PATH}")
-        except Exception as e:
-            ui_status_var.set("Estado: Error")
-            log(f"ERROR: {e}")
-            messagebox.showerror("Error", str(e))
+            event_q.put(("log", f"Listo. Procesados OK: {n}"))
+            event_q.put(("done_ok", {
+                "ui_status": f"Estado: Terminado (OK: {n})",
+                "title": "Terminado",
+                "messagebox_info": f"Procesados OK: {n}\n\nRevisa el Excel:\n{CONTROL_PATH}",
+            }))
+
+        _set_busy(True)
+        threading.Thread(target=job, daemon=True).start()
 
     # -----------------------
     # UI sections
     # -----------------------
 
-    # Configuración
     cfg = _section(frame, "Configuración")
     cfg.grid_columnconfigure(0, weight=1)
     cfg.grid_columnconfigure(1, weight=0)
@@ -391,7 +444,6 @@ def mount(parent):
     )
     btn_pick_attach.grid(row=1, column=1, sticky="e", padx=(GAP_MD, 0))
 
-    # Acciones
     act = _section(frame, "Acciones")
     act.grid_columnconfigure(0, weight=1)
     act.grid_columnconfigure(1, weight=1)
@@ -415,12 +467,10 @@ def mount(parent):
     )
     btn_process.grid(row=0, column=2, sticky="ew", pady=(0, GAP_SM))
 
-    # Estado (para usuarios)
     ctk.CTkLabel(act, textvariable=ui_status_var, font=FONT_BODY, **LABEL_COLOR).grid(
         row=1, column=0, columnspan=3, sticky="w", pady=(6, 0)
     )
 
-    # Herramientas (terciarias)
     tools_row = ctk.CTkFrame(act, fg_color="transparent")
     tools_row.grid(row=2, column=0, columnspan=3, sticky="ew", pady=(8, 0))
 
@@ -446,7 +496,6 @@ def mount(parent):
     )
     btn_show_log.grid(row=0, column=2, sticky="e")
 
-    # Hint
     hint = (
         "Flujo:\n"
         "1) Configura carpeta Outlook y carpeta de adjuntos.\n"
@@ -458,7 +507,6 @@ def mount(parent):
         anchor="w", pady=(0, GAP_MD)
     )
 
-    # Inicial
     refresh_status()
     ui_status_var.set("Estado: Listo")
 

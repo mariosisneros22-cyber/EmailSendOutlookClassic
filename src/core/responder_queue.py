@@ -85,13 +85,13 @@ def ensure_control_file():
     df = pd.read_excel(CONTROL_PATH).fillna("")
     changed = False
 
-    for col in ["nombre_sugerido", "error"]:
+    for col in ["nombre_sugerido", "nombre_archivo", "estado", "fecha_envio", "error"]:
         if col not in df.columns:
-            df[col]= ""
+            df[col] = ""
             changed = True
 
     if changed:
-        df.to_excel(CONTROL_PATH,index=False)
+        df.to_excel(CONTROL_PATH, index=False)
         
         
 def update_control_from_outlook():
@@ -195,6 +195,9 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
                 raise RuntimeError("last_entry_id vacío en el control.xlsx")
             
             anchor_mail=get_item_by_entry_id(ns, anchor_entry_id, store_id)            
+            if anchor_mail is None:
+                raise RuntimeError("No se pudo obtener el correo ancla desde EntryID (puede haber sido movido/eliminado).")
+            
             
             last_mail = anchor_mail
             #last_mail=find_latest_in_conversation_by_anchor(ns, anchor_mail)
@@ -209,6 +212,7 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
                 delay_segundos=delay_segundos
             )
             
+            sent_ok = True
             df.at[idx, "estado"]="Enviado"
             df.at[idx, "fecha_envio"] =datetime.now().strftime("%Y-%m-%d %H:%M:%S")
             df.at[idx, "error"] =""
@@ -231,7 +235,7 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
                 df.at[idx,"error"] = f"WARN move: {e}"
 
         except Exception as e:
-            if str(df.at[idx, "estado"]).strip().lower() == "enviado":
+            if sent_ok:
                 df.at[idx, "error"] = f"WARN post-send: {e}"
             else:
                 df.at[idx, "estado"] = "Error"
@@ -248,6 +252,9 @@ def fill_suggested_names(year_mode: str = "current", only_if_empty: bool = True)
     ensure_control_file()
     df = pd.read_excel(CONTROL_PATH).fillna("")
     
+    if "subject" not in df.columns:
+        return 0
+    
     if "nombre_sugerido" not in df.columns:
         df["nombre_sugerido"] = ""
     
@@ -257,15 +264,13 @@ def fill_suggested_names(year_mode: str = "current", only_if_empty: bool = True)
             continue
         
         subject= str(df.at[i, "subject"]).strip()
-        if "subject" not in df.columns:
-            return 0
-        
         suggest = build_filename_from_subject(subject, year_mode=year_mode)
         if suggest:
             df.at[i, "nombre_sugerido"]= suggest
             changed +=1
     
-    df.to_excel(CONTROL_PATH, index = False)
+    if changed:
+        df.to_excel(CONTROL_PATH, index = False)
     return changed
 
 def apply_suggested_to_nombre_archivo(only_if_empty: bool = True, add_pdf_ext:bool = False) -> int:

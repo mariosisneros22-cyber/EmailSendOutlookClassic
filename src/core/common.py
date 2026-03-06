@@ -13,11 +13,9 @@ def _cell_text(v) -> str:
     - strings => strip()
     - otros => str(...).strip()
     """
-    try:
-        if pd.isna(v):
-            return ""
-    except Exception:
-        pass
+    if pd.isna(v):
+        return ""
+    
     return str(v).strip()
 
 
@@ -25,11 +23,12 @@ def _asegurar_leible(path: str):
     try:
         with open(path, "rb") as f:
             f.read(1)
-    except Exception as e:
+    except (FileNotFoundError, PermissionError, OSError) as e:
         raise FileNotFoundError(
-            f"No se pudo acceder al archivo (posible OneDrive solo-en-línea): {path}\n"
-            "Marca la carpeta/archivo como 'Mantener siempre en este dispositivo'."
+            f"No se pudo acceder al archivo: {path}\n"
+            "Si está en OneDrive, marca la carpeta/archivo como 'Mantener siempre en este dispositivo'."
         ) from e
+
 
 
 def _copiar_a_temp_corto(ruta: str) -> str:
@@ -52,18 +51,18 @@ def _progress_init(progress, total: int):
     if progress is None:
         return
 
+    total = max(1, int(total))
+
     # CTkProgressBar: tiene método set()
     if hasattr(progress, "set") and callable(getattr(progress, "set")):
-        try:
-            setattr(progress, "_total", max(1, int(total)))
-        except Exception:
-            pass
+        # guardar total para _progress_set
+        setattr(progress, "_total", total)
         try:
             progress.set(0)
         except Exception:
             pass
         return
-
+    
     # ttk.Progressbar (dict-style)
     try:
         progress["maximum"] = total

@@ -10,14 +10,16 @@ def _iter_mailitems(folder):
     # COM collection: iterar directo a veces falla si cambia mientras iteras
     # Mejor: snapshot por índice
     items = folder.Items
-    n = items.Count
-    for i in range(1, n + 1):
+    count = items.Count
+
+    for i in range(1, count + 1):
         try:
-            it = items.Item(i)
-            if getattr(it, "Class", None) == MAILITEM_CLASS:
-                yield it
+            item = items.Item(i)
         except Exception:
             continue
+
+        if getattr(item, "Class", None) == MAILITEM_CLASS:
+            yield item
         
 def find_latest_in_conversation(folder, conversation_id:str):
     latest=None
@@ -45,27 +47,23 @@ def reply_all_with_attachment(mail_item, pdf_path: str, html_body: str | None = 
     Responde con ReplyAll al mail_item (idealmente el último del hilo), adjunta PDF, envía.
     """
     _asegurar_leible(pdf_path)
-    
-    #ReplyAll
-    reply=mail_item.ReplyAll()
-    
-    #cuerpo (opcional): si no quieres tocar, comenta este bloque
-    if html_body is not None:
-        reply.HTMLBody =html_body + "<br><br>" + (reply.HTMLBody or "")
-        
-    #adjunto (copia corta)
-    tmp = _copiar_a_temp_corto(pdf_path)
-    reply.Attachments.Add(tmp)
-    
-    reply.Send()
-    time.sleep(delay_segundos)
-    
-    #limpiar temp
-    try:
-        os.remove(tmp)
-    except Exception:
-        pass
 
+    reply = mail_item.ReplyAll()
+
+    if html_body is not None:
+        reply.HTMLBody = html_body + "<br><br>" + (reply.HTMLBody or "")
+
+    tmp = _copiar_a_temp_corto(pdf_path)
+    try:
+        reply.Attachments.Add(tmp)
+        reply.Send()
+        time.sleep(delay_segundos)
+    finally:
+        if os.path.isfile(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
 
 def get_item_by_entry_id(ns, entry_id: str, store_id: str | None = None):
     if store_id:
@@ -83,10 +81,11 @@ def iter_conversation_items(conversation):
         yield it
         try:
             children = conversation.GetChildren(it)
-            for ch in children:
-                stack.append(ch)
         except Exception:
-            pass
+            continue
+        
+        for ch in children:
+            stack.append(ch)
         
 def find_latest_in_conversation_by_anchor(ns, anchor_mail, only_mailitems=True):
     conv = anchor_mail.GetConversation()
