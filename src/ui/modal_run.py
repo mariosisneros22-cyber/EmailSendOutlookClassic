@@ -68,6 +68,9 @@ def run_with_modal(
         if stop_event.is_set():
             status_lbl.configure(text="Cancelando...")
             return
+        stop_event.set()
+        status_lbl.configure(text = "Cancelando...")
+        btn_stop.configure(state = "disabled")
 
     def _on_progress(i, total, estado, *extras):
         count_lbl.configure(text=f"{i} / {total}")

@@ -236,7 +236,7 @@ def mount(parent):
 
     _poll_events()
 
-    def _run_in_thread(fn, *, ui_start_status: str, ok_title: str | None = None, ok_msg: str | None = None):
+    def _run_in_thread(fn, *, ui_start_status: str):
         if busy["flag"]:
             return
 
@@ -247,17 +247,26 @@ def mount(parent):
             try:
                 result = fn()
                 payload = {"ui_status": "Estado: Listo"}
-                if ok_title or ok_msg:
-                    payload["title"] = ok_title or "Listo"
-                    payload["messagebox_info"] = ok_msg
+                
+                if isinstance(result, dict):
+                    payload.update(result)
+                
                 event_q.put(("done_ok", payload))
-                return result
             except Exception as e:
                 event_q.put(("done_err", e))
-                return None
 
         threading.Thread(target=worker, daemon=True).start()
 
+    
+    def _run_action(*, ui_start_status: str, log_start: str | None, action_fn, build_done_payload):
+        def task():
+            if log_start:
+                event_q.put(("log", log_start))
+            result = action_fn()
+            return build_done_payload(result)
+        
+        _run_in_thread(task, ui_start_status=ui_start_status)
+        
     # -----------------------
     # State refresh
     # -----------------------
@@ -326,25 +335,23 @@ def mount(parent):
             messagebox.showerror("Error", "Primero elige la carpeta Outlook.")
             return
 
-        def job():
-            event_q.put(("status", "Estado: Actualizando cola…"))
-            event_q.put(("log", "Actualizando cola desde Outlook…"))
-            n = update_control_from_outlook()
-            event_q.put(("log", f"Listo. Se agregaron {n} conversaciones nuevas."))
-            event_q.put(("done_ok", {
+        _run_action(
+            ui_start_status="Estado: Actualizando cola...",
+            log_start="Actualizando cola desde Outlook...",
+            action_fn=update_control_from_outlook,
+            build_done_payload=lambda n: {
                 "ui_status": f"Estado: Cola actualizada (+{n})",
-                "title": "Actualización completada",
-                "messagebox_info": f"Se agregaron {n} conversaciones nuevas.\n\n{CONTROL_PATH}",
-            }))
-
-        _set_busy(True)
-        threading.Thread(target=job, daemon=True).start()
-
+                "title": "Actualización completa",
+                "messagebox_info": f"Se agregaron {n} conversaciones nuevas. \n\n{CONTROL_PATH}",
+            },
+        )
+    
+    
     def on_open_control():
         if busy["flag"]:
             return
         try:
-            ui_status_var.set("Estado: Abriendo control.xlsx…")
+            ui_status_var.set("Estado: Abriendo control.xlsx...")
             _open_file(CONTROL_PATH)
             ui_status_var.set("Estado: Listo")
         except Exception as e:
@@ -353,34 +360,29 @@ def mount(parent):
             messagebox.showerror("Error", str(e))
 
     def on_fill_suggested():
-        def job():
-            event_q.put(("status", "Estado: Generando sugeridos…"))
-            event_q.put(("log", "Generando nombre_sugerido desde subject…"))
-            n = fill_suggested_names(year_mode="current", only_if_empty=True)
-            event_q.put(("log", f"Listo. Se generaron/actualizaron {n} sugeridos."))
-            event_q.put(("done_ok", {
+        _run_action(
+            ui_start_status="Estado: Generando sugeridos...",
+            log_start="Generando nombre_sugerido desde subject...",
+            action_fn=lambda: fill_suggested_names(year_mode="current", only_if_empty=True),
+            build_done_payload=lambda n: {
                 "ui_status": f"Estado: Sugeridos listos ({n})",
                 "title": "Listo",
                 "messagebox_info": f"Sugeridos generados: {n}\n\n{CONTROL_PATH}",
-            }))
-
-        _set_busy(True)
-        threading.Thread(target=job, daemon=True).start()
+            },
+        )
 
     def on_apply_suggested():
-        def job():
-            event_q.put(("status", "Estado: Aplicando sugeridos…"))
-            event_q.put(("log", "Copiando nombre_sugerido → nombre_archivo…"))
-            n = apply_suggested_to_nombre_archivo(only_if_empty=True, add_pdf_ext=False)
-            event_q.put(("log", f"Listo. Se copiaron {n} valores a nombre_archivo."))
-            event_q.put(("done_ok", {
+        _run_action(
+            ui_start_status="Estado: Aplicando sugeridos...",
+            log_start="Copiando nombre_sugerido -> nombre_archivo...",
+            action_fn=lambda: apply_suggested_to_nombre_archivo(only_if_empty=True, add_pdf_ext=False),
+            build_done_payload=lambda n: {
                 "ui_status": f"Estado: NombreArchivo actualizado ({n})",
                 "title": "Listo",
                 "messagebox_info": f"Copiados a nombre_archivo: {n}\n\n{CONTROL_PATH}",
-            }))
-
-        _set_busy(True)
-        threading.Thread(target=job, daemon=True).start()
+            },
+        )
+            
 
     def on_process_pending():
         refresh_status()
@@ -395,28 +397,22 @@ def mount(parent):
             messagebox.showerror("Error", "Primero elige la carpeta de adjuntos.")
             return
 
-        def job():
-            event_q.put(("status", "Estado: Procesando pendientes…"))
-            event_q.put(("log", "Procesando pendientes…"))
-
-            n = process_pending_responses(
+        _run_action(
+            ui_start_status="Estado: Procesando pendientes...",
+            log_start="Procesando pendientse...",
+            action_fn=lambda: process_pending_responses(
                 carpeta_archivos=attach_dir,
                 html_body=None,
                 delay_segundos=1.0,
                 only_first_n=None,
                 logger=lambda s: event_q.put(("log", s)),
-            )
-
-            event_q.put(("log", f"Listo. Procesados OK: {n}"))
-            event_q.put(("done_ok", {
+            ),
+            build_done_payload=lambda n: {
                 "ui_status": f"Estado: Terminado (OK: {n})",
                 "title": "Terminado",
-                "messagebox_info": f"Procesados OK: {n}\n\nRevisa el Excel:\n{CONTROL_PATH}",
-            }))
-
-        _set_busy(True)
-        threading.Thread(target=job, daemon=True).start()
-
+                "messagebox_info": f"Procesados OK: {n}\n\nRevisa el Excel:\n{CONTROL_PATH}"
+            },
+        )
     # -----------------------
     # UI sections
     # -----------------------
@@ -511,3 +507,6 @@ def mount(parent):
     ui_status_var.set("Estado: Listo")
 
     return frame
+
+ 
+ 

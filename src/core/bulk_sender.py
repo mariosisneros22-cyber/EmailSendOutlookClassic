@@ -251,8 +251,8 @@ def enviar_correos(
             if callable(on_progress):
                 try:
                     on_progress(i, total, estado, nombre, correo)
-                except Exception:
-                    print(f"on_progress falló: {e}")
+                except Exception as progress_err:
+                    print(f"on_progress falló: {progress_err}")
 
             _progress_set(progress, i)
             if root is not None:
@@ -371,15 +371,28 @@ def enviar_correos(
 
                 rutas_generadas.append(ruta_excel_log)
             if generar_pdf:
-                ruta_pdf_log = ruta_base_reporte.strip() + ".pdf"
-                # El PDF lo generamos con la lista original (reportes.py separa adentro)
+                base_pdf = ruta_base_reporte.strip()
+                
+                registros_enviados = [r for r in registros if str(r.get("Estado", "")).strip().lower() == "enviado"]
+                registros_errores = [r for r in registros if str(r.get("Estado", "")).strip().lower() != "enviado"]
+                
+                ruta_pdf_enviados = base_pdf + "_enviados.pdf"
                 generar_pdf_registro(
-                    registros,
-                    ruta_pdf_log,
-                    logo_path=logo_for_use,
-                    report_title=report_title,
+                    registros_enviados,
+                    ruta_pdf_enviados,
+                    logo_path = logo_for_use,
+                    report_title = f"{report_title} - Enviados",
                 )
-                rutas_generadas.append(ruta_pdf_log)
+                rutas_generadas.append(ruta_pdf_enviados)
+                
+                ruta_pdf_errores = base_pdf + "-errores.pdf"
+                generar_pdf_registro(
+                    registros_errores,
+                    ruta_pdf_errores,
+                    logo_path = logo_for_use,
+                    report_title = f"{report_title} - Errores" 
+                )
+                rutas_generadas.append(ruta_pdf_errores)
 
         procesados = len(registros)
 

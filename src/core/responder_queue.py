@@ -12,6 +12,7 @@ from core.responder_sender import (
     get_item_by_entry_id,
     move_mail,
     reply_all_with_attachment,
+    find_latest_in_conversation_by_anchor
 )
 from core.common import safe_join_file
 from core.naming_rules import build_filename_from_subject
@@ -187,6 +188,7 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
             df.at[idx, "error"] = "nombre_archivo vacío"
             continue
         
+        sent_of = False
         try:
             pdf_path = safe_join_file(carpeta_archivos, nombre_archivo)
 
@@ -199,8 +201,8 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
                 raise RuntimeError("No se pudo obtener el correo ancla desde EntryID (puede haber sido movido/eliminado).")
             
             
-            last_mail = anchor_mail
-            #last_mail=find_latest_in_conversation_by_anchor(ns, anchor_mail)
+            #last_mail = anchor_mail
+            last_mail=find_latest_in_conversation_by_anchor(ns, anchor_mail)
             
             if last_mail is None:
                 raise RuntimeError("No se encontró el último mail del hilo en la carpeta seleccionada.")
