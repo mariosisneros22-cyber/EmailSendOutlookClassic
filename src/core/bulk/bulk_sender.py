@@ -13,13 +13,10 @@ from core.shared.text_utils import _cell_text
     
 from core.outlook.outlook_client import get_outlook_app
 
-from reports.report_pdf import generar_pdf_registro
+from reports.report_pdf import generar_pdfs_registro
 
 # Tamaño único para TODOS (email/excel/pdf)
 LOGO_H_PX = 60
-
-# Para PDF: conversión px->points (asumiendo 96dpi)
-LOGO_H_PT = LOGO_H_PX * 72 / 96
 
 
 def _logo_size_keep_height_px(path: str, target_h_px: int) -> tuple[int, int]:
@@ -78,6 +75,7 @@ def enviar_correos(
     # NUEVO: hoja del Excel y header
     hoja_excel=0,
     header_idx: int = 0,
+    df_preloaded=None,
     # columnas elegidas
     col_nombre: str | None = None,
     col_correo: str | None = None,
@@ -100,9 +98,12 @@ def enviar_correos(
     ):
         raise ValueError("Selecciona dónde guardar el informe (ruta base).")
 
-    # Leer la hoja seleccionada
-    _asegurar_leible(ruta_excel)
-    df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
+    # Reusar dataframe precargado cuando viene desde UI para evitar doble lectura de Excel.
+    if df_preloaded is not None:
+        df = df_preloaded.copy()
+    else:
+        _asegurar_leible(ruta_excel)
+        df = pd.read_excel(ruta_excel, sheet_name=hoja_excel, header=header_idx)
 
     if not col_nombre or not col_correo or not col_archivo:
         raise ValueError(
@@ -150,16 +151,16 @@ def enviar_correos(
         cancelado = False
        
 
-        for i, (_, fila) in enumerate(df.iterrows(), start=1):
+        for i, (raw_nombre, raw_correo, raw_archivo) in enumerate(
+            df[[col_nombre, col_correo, col_archivo]].itertuples(index=False, name=None), start=1
+        ):
             if callable(is_cancelled) and is_cancelled():
                 cancelado = True
                 break
 
-            nombre = _cell_text(fila[col_nombre])
-            correo = _cell_text(
-                fila[col_correo]
-            ).lower()  # opcional: normalizar a minúsculas
-            nombre_archivo = _cell_text(fila[col_archivo])
+            nombre = _cell_text(raw_nombre)
+            correo = _cell_text(raw_correo).lower()  # opcional: normalizar a minúsculas
+            nombre_archivo = _cell_text(raw_archivo)
 
             ahora = datetime.now()
             fecha = ahora.strftime("%Y-%m-%d")
@@ -367,29 +368,23 @@ def enviar_correos(
 
                 rutas_generadas.append(ruta_excel_log)
             if generar_pdf:
+                
                 base_pdf = ruta_base_reporte.strip()
-                
-                registros_enviados = [r for r in registros if str(r.get("Estado", "")).strip().lower() == "enviado"]
-                registros_errores = [r for r in registros if str(r.get("Estado", "")).strip().lower() != "enviado"]
-                
+            
                 ruta_pdf_enviados = base_pdf + "_enviados.pdf"
-                generar_pdf_registro(
-                    registros_enviados,
-                    ruta_pdf_enviados,
+                ruta_pdf_errores = base_pdf + "_errores.pdf"
+                
+                generar_pdfs_registro(
+                    registros=registros,
+                    ruta_pdf_enviados=ruta_pdf_enviados,
+                    ruta_pdf_errores=ruta_pdf_errores,
                     logo_path = logo_for_use,
                     report_title = f"{report_title} - Enviados",
                 )
-                rutas_generadas.append(ruta_pdf_enviados)
                 
-                ruta_pdf_errores = base_pdf + "-errores.pdf"
-                generar_pdf_registro(
-                    registros_errores,
-                    ruta_pdf_errores,
-                    logo_path = logo_for_use,
-                    report_title = f"{report_title} - Errores" 
-                )
+                rutas_generadas.append(ruta_pdf_enviados)
                 rutas_generadas.append(ruta_pdf_errores)
-
+            
         procesados = len(registros)
 
         if cancelado:

@@ -25,7 +25,6 @@ from ui.widgets import (
 
 PREVIEW_N = 5
 preview_df = None
-preview_row = None
 
 LOGOS_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "assets", "logo"))
 LOGO_NONE_LABEL = "Ninguno"
@@ -165,10 +164,9 @@ def cargar_columnas_excel():
 # -------- VISTA PREVIA --------
 
 def _load_preview_df(n=PREVIEW_N):
-    global preview_df, preview_row
+    global preview_df
     ruta = excel_entry.get().strip()
     preview_df = None
-    preview_row = None
 
     if not ruta:
         return
@@ -176,17 +174,14 @@ def _load_preview_df(n=PREVIEW_N):
     try:
         sheet = cb_hoja.get().strip() if cb_hoja.get().strip() else 0
         header_idx = _get_header_index()
-        dfp = pd.read_excel(ruta, sheet_name=sheet,header=header_idx, nrows=n)
+        dfp = pd.read_excel(ruta, sheet_name=sheet, header=header_idx, nrows=n)
         if dfp.empty:
             preview_df = None
-            preview_row = None
             return
         preview_df = dfp
-        preview_row = dfp.iloc[0].to_dict()
     except Exception as e:
         preview_df = None
-        preview_row = None
-        print(f"Preview error: {e}")  # opcional
+        messagebox.showerror("Error", f"No se pudo cargar la vista previa:\n{e}")
 
 
 def actualizar_tabla_preview():
@@ -205,18 +200,25 @@ def actualizar_tabla_preview():
     col_c = cb_correo.get().strip()
     col_a = cb_archivo.get().strip()
 
+    if not all(c and c in preview_df.columns for c in (col_n, col_c, col_a)):
+        preview_box.insert("1.0", "Selecciona columnas validas para la vista previa.")
+        preview_box.configure(state="disabled")
+        return
+
     def _clip(text: str, n: int) -> str:
         text = str(text)
-        return text if len(text) <= n else text[: n - 1] + "…"
+        return text if len(text) <= n else text[: n - 3] + "..."
 
     header = f"{'#':>2} | {'Nombre':<26} | {'Correo':<30} | {'NombreArchivo':<30}"
     sep = "-" * len(header)
     lines = [header, sep]
 
-    for idx, (_, row) in enumerate(preview_df.iterrows(), start=1):
-        v_n = _cell_text(row[col_n]) if col_n and col_n in preview_df.columns else ""
-        v_c = _cell_text(row[col_c]) if col_c and col_c in preview_df.columns else ""
-        v_a = _cell_text(row[col_a]) if col_a and col_a in preview_df.columns else ""
+    for idx, (v_n_raw, v_c_raw, v_a_raw) in enumerate(
+        preview_df[[col_n, col_c, col_a]].itertuples(index=False, name=None), start=1
+    ):
+        v_n = _cell_text(v_n_raw)
+        v_c = _cell_text(v_c_raw)
+        v_a = _cell_text(v_a_raw)
         lines.append(
             f"{idx:>2} | {_clip(v_n, 26):<26} | {_clip(v_c, 30):<30} | {_clip(v_a, 30):<30}"
         )
@@ -420,7 +422,7 @@ def abrir_modal_envio_y_ejecutar():
 
     # ---- calcular total sin cargar todo el Excel ----
     try:
-        df_head = pd.read_excel(
+        df_send = pd.read_excel(
             ruta_excel,
             sheet_name=hoja_excel,
             header=header_idx,
@@ -440,7 +442,7 @@ def abrir_modal_envio_y_ejecutar():
         messagebox.showerror("Error", f"No se pudo leer el Excel:\n{e}")
         return
 
-    total = len(df_head)
+    total = len(df_send)
     if total <= 0:
         messagebox.showerror("Error", "El Excel no tiene filas.")
         return
@@ -468,6 +470,7 @@ def abrir_modal_envio_y_ejecutar():
         col_archivo=col_archivo,
         hoja_excel=hoja_excel,
         header_idx=header_idx,  # usa el ya calculado
+        df_preloaded=df_send,
         logo_path=selected_logo_path,
         report_title=report_title,
         show_summary_messagebox=False,
@@ -503,8 +506,10 @@ def mount(parent):
 
     frame_main = ctk.CTkFrame(parent, fg_color="transparent")
     frame_main.pack(fill="both", expand=True, padx=10, pady=10)
+    frame_main.rowconfigure(0, weight=1)
     frame_main.columnconfigure(0, weight=1)
     frame_main.columnconfigure(1, weight=1)
+
     frame_left = ctk.CTkFrame(
         frame_main,
         corner_radius=12,
@@ -529,15 +534,35 @@ def mount(parent):
     right_content = ctk.CTkFrame(frame_right, fg_color="transparent")
     right_content.pack(fill="both", expand=True, padx=20, pady=20)
 
+    def _simple_section(parent, title: str):
+        ctk.CTkLabel(parent, text=title, font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+        body = ctk.CTkFrame(parent, fg_color="transparent")
+        body.pack(fill="x", pady=(0, PADY_MD))
+        return body
+
+    sec_left_input = _simple_section(left_content, "Datos de entrada")
+    sec_left_preview = _simple_section(left_content, f"Vista previa ({PREVIEW_N} filas)")
+
+    sec_right_brand = _simple_section(right_content, "Mensaje y marca")
+    sec_right_send = _simple_section(right_content, "Parametros de envio")
+    sec_right_report = _simple_section(right_content, "Informe / Registro")
+    sec_right_action = ctk.CTkFrame(right_content, fg_color="transparent")
+    sec_right_action.pack(fill="x", pady=(0, PADY_MD))
+
     # Excel
-    ctk.CTkLabel(left_content, text="Archivo Excel", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    excel_entry = ctk.CTkEntry(left_content)
-    excel_entry.pack(fill="x", pady=(0, PADY_MD))
-    btn_excel = make_secondary_button(left_content, text="Seleccionar Excel", command=seleccionar_excel)
-    btn_excel.pack(fill="x", pady=(0, PADY_MD))
+    ctk.CTkLabel(sec_left_input, text="Archivo Excel", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    row_excel = ctk.CTkFrame(sec_left_input, fg_color="transparent")
+    row_excel.pack(fill="x", pady=(0, PADY_MD))
+    row_excel.grid_columnconfigure(0, weight=1)
+    excel_entry = ctk.CTkEntry(row_excel)
+    excel_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
+    btn_excel = make_secondary_button(
+        row_excel, text="Seleccionar Excel", command=seleccionar_excel, width=170
+    )
+    btn_excel.grid(row=0, column=1, sticky="e")
 
     # --- HOJA + MAPEO (layout 2 columnas: Título | Celda) ---
-    excel_map_frame = ctk.CTkFrame(left_content, fg_color="transparent")
+    excel_map_frame = ctk.CTkFrame(sec_left_input, fg_color="transparent")
     excel_map_frame.pack(fill="x", pady=(0, PADY_MD))
 
     excel_map_frame.grid_columnconfigure(0, weight=0)  # títulos
@@ -610,27 +635,29 @@ def mount(parent):
     btn_cargar_cols.grid(row=5, column=1, sticky="e", pady=(ROW_PADY, 0))
 
     # Vista previa (CTkTextbox)
-    ctk.CTkLabel(left_content, text=f"Vista previa ({PREVIEW_N} filas)", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    frame_table = ctk.CTkFrame(left_content)
-    frame_table.pack(fill="both", expand=True, pady=(0, PADY_MD))
+    frame_table = ctk.CTkFrame(sec_left_preview)
+    frame_table.pack(fill="both", expand=True)
     preview_box = ctk.CTkTextbox(frame_table, height=170)
     preview_box.pack(fill="both", expand=True, padx=10, pady=10)
     preview_box.insert("1.0", "(sin datos para previsualizar)")
     preview_box.configure(state="disabled")
 
     # Carpeta
-    ctk.CTkLabel(left_content, text="Carpeta donde están TODOS los archivos", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    carpeta_entry = ctk.CTkEntry(left_content)
-    carpeta_entry.pack(fill="x", pady=(0, PADY_MD))
+    ctk.CTkLabel(sec_left_input, text="Carpeta donde estan TODOS los archivos", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    row_carpeta = ctk.CTkFrame(sec_left_input, fg_color="transparent")
+    row_carpeta.pack(fill="x", pady=(0, PADY_MD))
+    row_carpeta.grid_columnconfigure(0, weight=1)
+    carpeta_entry = ctk.CTkEntry(row_carpeta)
+    carpeta_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
     btn_carpeta = make_secondary_button(
-        left_content, text="Seleccionar carpeta", command=seleccionar_carpeta
+        row_carpeta, text="Seleccionar carpeta", command=seleccionar_carpeta, width=170
     )
-    btn_carpeta.pack(fill="x", pady=(0, PADY_MD))
+    btn_carpeta.grid(row=0, column=1, sticky="e")
 
 
 
     # --- Logos (arriba de Asunto) ---
-    frame_logo = ctk.CTkFrame(right_content, fg_color="transparent")
+    frame_logo = ctk.CTkFrame(sec_right_brand, fg_color="transparent")
     frame_logo.pack(fill="x", pady=(0, PADY_MD))
 
     frame_logo.grid_columnconfigure(0, weight=0)  # "Logo"
@@ -666,17 +693,17 @@ def mount(parent):
     )
     btn_ins_logo.grid(row=0, column=3, sticky="e", padx=(12, 0), pady=6)
 
-    lbl_logo_estado = ctk.CTkLabel(right_content, text="Logo: (ninguno)")
+    lbl_logo_estado = ctk.CTkLabel(sec_right_brand, text="Logo: (ninguno)")
     lbl_logo_estado.pack(anchor="w", pady=(0, PADY_MD))
 
     # Asunto
-    ctk.CTkLabel(right_content, text="Asunto", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    asunto_entry = ctk.CTkEntry(right_content)
+    ctk.CTkLabel(sec_right_brand, text="Asunto", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    asunto_entry = ctk.CTkEntry(sec_right_brand)
     asunto_entry.pack(fill="x", pady=(0, PADY_MD))
 
     # Mensaje
-    ctk.CTkLabel(right_content, text="Mensaje", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    mensaje_text = ctk.CTkTextbox(right_content, height=200)
+    ctk.CTkLabel(sec_right_brand, text="Mensaje", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    mensaje_text = ctk.CTkTextbox(sec_right_brand, height=200)
     mensaje_text.insert(
         "1.0",
         "Hola,\n\n"
@@ -687,8 +714,8 @@ def mount(parent):
     mensaje_text.pack(fill="both", expand=True, pady=(0, PADY_MD))
 
     # Controles: límite y delay
-    frame_envio = ctk.CTkFrame(right_content, fg_color="transparent")
-    frame_envio.pack(fill="x", pady=(0, PADY_MD))
+    frame_envio = ctk.CTkFrame(sec_right_send, fg_color="transparent")
+    frame_envio.pack(fill="x")
     frame_envio.columnconfigure(1, weight=0)
     frame_envio.columnconfigure(3, weight=0)
 
@@ -699,14 +726,13 @@ def mount(parent):
 
     ctk.CTkLabel(frame_envio, text="Delay (segundos) entre envíos", font=FONT_LABEL).grid(row=0, column=2, sticky="w", pady=4)
     delay_entry = ctk.CTkEntry(frame_envio, width=80)
-    delay_entry.insert(0, "1.5")
+    delay_entry.insert(0, "0")
     delay_entry.grid(row=0, column=3, padx=(10, 0), pady=4)
 
-    # Sección Reporte
-    ctk.CTkLabel(right_content, text="Informe / Registro", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-
-    frame_checks = ctk.CTkFrame(right_content, fg_color="transparent")
+    frame_checks = ctk.CTkFrame(sec_right_report, fg_color="transparent")
     frame_checks.pack(fill="x", pady=(0, PADY_MD))
+    frame_checks.grid_columnconfigure(0, weight=1)
+    frame_checks.grid_columnconfigure(1, weight=1)
 
     gen_excel_var = tk.BooleanVar(master=root, value=True)
     gen_pdf_var = tk.BooleanVar(master=root, value=False)
@@ -718,7 +744,7 @@ def mount(parent):
         command=_toggle_reporte_ui,
         **CHECKBOX_STYLE,
     )
-    chk_excel.pack(anchor="w", pady=(0, 6))
+    chk_excel.grid(row=0, column=0, sticky="w", pady=(0, 6), padx=(0, 12))
 
     chk_pdf = ctk.CTkCheckBox(
         frame_checks,
@@ -727,36 +753,40 @@ def mount(parent):
         command=_toggle_reporte_ui,
         **CHECKBOX_STYLE,
     )
-    chk_pdf.pack(anchor="w")
+    chk_pdf.grid(row=0, column=1, sticky="w", pady=(0, 6))
 
-    ctk.CTkLabel(right_content, text="Ruta base del informe (sin extensión)", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    reporte_entry = ctk.CTkEntry(right_content)
-    reporte_entry.pack(fill="x", pady=(0, PADY_SM))
+    ctk.CTkLabel(sec_right_report, text="Ruta base del informe (sin extension)", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    row_reporte = ctk.CTkFrame(sec_right_report, fg_color="transparent")
+    row_reporte.pack(fill="x", pady=(0, PADY_SM))
+    row_reporte.grid_columnconfigure(0, weight=1)
+    reporte_entry = ctk.CTkEntry(row_reporte)
+    reporte_entry.grid(row=0, column=0, sticky="ew", padx=(0, 8))
 
     btn_reporte = make_secondary_button(
-        right_content,
-        text="Elegir dónde guardar informe",
+        row_reporte,
+        text="Elegir donde guardar informe",
         command=seleccionar_ruta_reporte,
+        width=220,
     )
-    btn_reporte.pack(fill="x", pady=(0, PADY_MD))
+    btn_reporte.grid(row=0, column=1, sticky="e")
 
     _toggle_reporte_ui()
 
 
     # --- Título del reporte (antes de ENVIAR) ---
-    ctk.CTkLabel(right_content, text="Título del reporte", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
-    titulo_reporte_entry = ctk.CTkEntry(right_content)
+    ctk.CTkLabel(sec_right_report, text="Titulo del reporte", font=FONT_LABEL).pack(anchor="w", pady=(0, PADY_SM))
+    titulo_reporte_entry = ctk.CTkEntry(sec_right_report)
     titulo_reporte_entry.insert(0, "Registro de envío de correos")  # default
     titulo_reporte_entry.pack(fill="x", pady=(0, PADY_MD))
 
     # Botones
     btn_enviar = make_primary_button(
-        right_content,
+        sec_right_action,
         text="ENVIAR CORREOS",
         command=abrir_modal_envio_y_ejecutar,
         height=40,
     )
-    btn_enviar.pack(fill="x", pady=(0, PADY_SM))
+    btn_enviar.pack(fill="x")
 
 
     _set_excel_controls_enabled(False)

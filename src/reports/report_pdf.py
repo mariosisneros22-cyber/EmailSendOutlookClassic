@@ -7,7 +7,6 @@ from reportlab.platypus import (
     Paragraph,
     Spacer,
     KeepInFrame,
-    PageBreak,
 )
 from reportlab.lib.pagesizes import A4, landscape
 from reportlab.lib.colors import black, lightgrey
@@ -18,9 +17,6 @@ from reportlab.lib.enums import TA_CENTER
 
 
 def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, float]:
-    """
-    Retorna (w_pt, h_pt) manteniendo proporción con altura fija target_h_pt.
-    """
     ir = ImageReader(path)
     w0, h0 = ir.getSize()
     if not w0 or not h0:
@@ -29,19 +25,12 @@ def _logo_size_keep_height_pt(path: str, target_h_pt: float) -> tuple[float, flo
     return (max(1.0, w_pt), target_h_pt)
 
 
-def generar_pdf_registro(
+def _generar_pdf_tabla(
     registros,
     ruta_pdf: str,
+    titulo_pdf: str,
     logo_path: str | None = None,
-    report_title: str = "Registro de envío de correos",
 ):
-    enviados = [
-        r for r in registros if str(r.get("Estado", "")).strip().lower() == "enviado"
-    ]
-    errores = [
-        r for r in registros if str(r.get("Estado", "")).strip().lower() != "enviado"
-    ]
-
     doc = SimpleDocTemplate(
         ruta_pdf,
         pagesize=landscape(A4),
@@ -57,7 +46,6 @@ def generar_pdf_registro(
         parent=styles["Title"],
         alignment=TA_CENTER,
     )
-    section_style = styles["Heading2"]
 
     cell_style = ParagraphStyle(
         "cell",
@@ -75,48 +63,31 @@ def generar_pdf_registro(
 
     headers = ["N°", "Nombre", "Correo", "Fecha", "Hora", "Estado"]
 
-    def build_table(rows):
-        data = [headers]
-        for idx, r in enumerate(rows, start=1):
-            data.append(
-                [
-                    P(idx),
-                    P(r.get("Nombre", "")),
-                    P(r.get("Correo", "")),
-                    P(r.get("Fecha", "")),
-                    P(r.get("Hora", "")),
-                    P(r.get("Estado", "")),
-                ]
-            )
-
-        available_width = doc.width
-        col_widths = [
-            available_width * 0.06,
-            available_width * 0.14,
-            available_width * 0.20,
-            available_width * 0.10,
-            available_width * 0.08,
-            available_width * 0.22,
-        ]
-
-        t = Table(data, repeatRows=1, colWidths=col_widths)
-        t.setStyle(
-            TableStyle(
-                [
-                    ("GRID", (0, 0), (-1, -1), 0.5, black),
-                    ("BACKGROUND", (0, 0), (-1, 0), lightgrey),
-                    ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
-                    ("FONTSIZE", (0, 0), (-1, 0), 9),
-                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
-                    ("ALIGN", (3, 1), (4, -1), "CENTER"),
-                ]
-            )
+    data = [headers]
+    for idx, r in enumerate(registros, start=1):
+        data.append(
+            [
+                P(idx),
+                P(r.get("Nombre", "")),
+                P(r.get("Correo", "")),
+                P(r.get("Fecha", "")),
+                P(r.get("Hora", "")),
+                P(r.get("Estado", "")),
+            ]
         )
-        return t
+
+    available_width = doc.width
+    col_widths = [
+        available_width * 0.08,
+        available_width * 0.18,
+        available_width * 0.28,
+        available_width * 0.12,
+        available_width * 0.10,
+        available_width * 0.24,
+    ]
 
     elementos = []
 
-    # Tamaño único (mismo que bulk_sender)
     LOGO_H_PX = 60
     LOGO_H_PT = LOGO_H_PX * 72 / 96
 
@@ -124,14 +95,13 @@ def generar_pdf_registro(
     has_logo = bool(logo_path) and os.path.isfile(logo_path)
 
     logo_flowable = Spacer(1, header_h)
-    w_pt = header_h * 2.5  # default razonable para la columna del logo
+    w_pt = header_h * 2.5
 
     if has_logo:
         w_pt, h_pt = _logo_size_keep_height_pt(logo_path, LOGO_H_PT)
         logo_flowable = RLImage(logo_path, width=w_pt, height=h_pt)
 
-    titulo_txt = (report_title or "").strip() or "Registro de envío de correos"
-    titulo = Paragraph(titulo_txt, title_style)
+    titulo = Paragraph(titulo_pdf.strip(), title_style)
     titulo_box = KeepInFrame(
         doc.width, header_h, [titulo], hAlign="CENTER", vAlign="MIDDLE"
     )
@@ -159,14 +129,51 @@ def generar_pdf_registro(
     elementos.append(header_tbl)
     elementos.append(Spacer(1, 10))
 
-    elementos.append(Paragraph(f"Enviados ({len(enviados)})", section_style))
-    elementos.append(Spacer(1, 4))
-    elementos.append(build_table(enviados) if enviados else Paragraph("(sin registros)", styles["Normal"]))
-
-    elementos.append(PageBreak())
-
-    elementos.append(Paragraph(f"Errores ({len(errores)})", section_style))
-    elementos.append(Spacer(1, 4))
-    elementos.append(build_table(errores) if errores else Paragraph("(sin registros)", styles["Normal"]))
+    if registros:
+        tabla = Table(data, repeatRows=1, colWidths=col_widths)
+        tabla.setStyle(
+            TableStyle(
+                [
+                    ("GRID", (0, 0), (-1, -1), 0.5, black),
+                    ("BACKGROUND", (0, 0), (-1, 0), lightgrey),
+                    ("FONT", (0, 0), (-1, 0), "Helvetica-Bold"),
+                    ("FONTSIZE", (0, 0), (-1, 0), 9),
+                    ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                    ("ALIGN", (0, 1), (0, -1), "CENTER"),
+                    ("ALIGN", (3, 1), (4, -1), "CENTER"),
+                ]
+            )
+        )
+        elementos.append(tabla)
+    else:
+        elementos.append(Paragraph("(sin registros)", styles["Normal"]))
 
     doc.build(elementos)
+
+
+def generar_pdfs_registro(
+    registros,
+    ruta_pdf_enviados: str,
+    ruta_pdf_errores: str,
+    logo_path: str | None = None,
+    report_title: str = "Registro de envío de correos"
+):
+    def estado_texto(r):
+        return str(r.get("Estado", "")).strip().lower()
+
+    enviados = [r for r in registros if estado_texto(r) == "enviado"]
+    errores = [r for r in registros if estado_texto(r) != "enviado"]
+
+    _generar_pdf_tabla(
+        registros=enviados,
+        ruta_pdf=ruta_pdf_enviados,
+        titulo_pdf=f"{report_title} ({len(enviados)})",
+        logo_path=logo_path,
+    )
+
+    _generar_pdf_tabla(
+        registros=errores,
+        ruta_pdf=ruta_pdf_errores,
+        titulo_pdf=f"{report_title} ({len(errores)})",
+        logo_path=logo_path,
+    )

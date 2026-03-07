@@ -11,7 +11,7 @@ def main():
 
     root = ctk.CTk()
     root.title("Automatizacion Outlook")
-    root.geometry("1200x850")
+    root.geometry("1200x950")
 
     tabs = ctk.CTkTabview(
         root,
