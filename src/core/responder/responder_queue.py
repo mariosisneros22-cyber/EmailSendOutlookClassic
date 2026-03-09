@@ -188,7 +188,7 @@ def process_pending_responses(carpeta_archivos: str, html_body: str | None = Non
             df.at[idx, "error"] = "nombre_archivo vacío"
             continue
         
-        sent_of = False
+        sent_ok = False
         try:
             pdf_path = safe_join_file(carpeta_archivos, nombre_archivo)
 
