@@ -1,3 +1,4 @@
+#core.shared.file_utils
 import tempfile
 import os
 import shutil
@@ -12,15 +13,22 @@ def _asegurar_leible(path: str):
             "Si está en OneDrive, marca la carpeta/archivo como 'Mantener siempre en este dispositivo'."
         ) from e
 
-def _copiar_a_temp_corto(ruta: str) -> str:
-    tmp_dir = os.path.join(tempfile.gettempdir(), "app_correo_adjuntos")
-    os.makedirs(tmp_dir, exist_ok=True)
+def crear_tmp_dir_adjuntos() -> str:
+    return tempfile.mkdtemp(prefix="app_correo_adjuntos_")
+
+def _copiar_a_temp_corto(ruta: str, tmp_dir: str | None = None) -> str:
+    if not tmp_dir:
+        tmp_dir = os.path.join(tempfile.gettempdir(), "app_correo_adjuntos")
+        os.makedirs(tmp_dir, exist_ok=True)
+        
     base_name = os.path.basename(ruta)
     stem, ext = os.path.splitext(base_name)
-    safe_stem = (stem or "adjunto")[:40]
-
-    fd, destino = tempfile.mkstemp(prefix=f"{safe_stem}_", suffix=ext, dir=tmp_dir)
-    os.close(fd)
+    
+    invalid_chars = '<>:"/\\|?*'
+    safe_stem = "".join("_" if c in invalid_chars else c for c in stem).strip()
+    safe_stem = safe_stem[:100] or "adjunto"
+    
+    destino = os.path.join(tmp_dir, safe_stem + ext)
     shutil.copy2(ruta, destino)
     return destino
   

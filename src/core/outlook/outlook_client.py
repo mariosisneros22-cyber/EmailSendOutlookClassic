@@ -1,6 +1,16 @@
 # core/outlook_client.py
 import win32com.client as win32
 import os, shutil, gc
+import threading, pythoncom
+
+_thread_local = threading.local()
+
+def _ensure_com_initialized():
+    if getattr(_thread_local, "com_initialized", False):
+        return
+    pythoncom.CoInitializeEx(pythoncom.COINIT_APARTMENTTHREADED)
+    _thread_local.com_initialized = True
+
 
 def _clear_gen_py_dirs():
     candidates = [
@@ -35,6 +45,7 @@ def _repair_gencache() -> None:
 
 
 def get_outlook_app(rebuild_on_error: bool = True):
+    _ensure_com_initialized()
     try:
         return _dispatch_outlook()
     except Exception:
@@ -55,4 +66,5 @@ def get_outlook_app(rebuild_on_error: bool = True):
 
 
 def get_mapi_namespace(outlook_app):
+    _ensure_com_initialized()
     return outlook_app.GetNamespace("MAPI")

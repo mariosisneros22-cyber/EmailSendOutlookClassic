@@ -1,13 +1,18 @@
 # core/bulk_sender.py
 from tkinter import messagebox
 import pandas as pd
-import os, time, tempfile
+import os, time, tempfile, shutil
 from datetime import datetime
 from openpyxl.drawing.image import Image as XLImage
 from openpyxl.worksheet.table import Table, TableStyleInfo
 from openpyxl.styles import Alignment, Font
 
-from core.shared.file_utils import _asegurar_leible, _copiar_a_temp_corto, safe_join_file
+from core.shared.file_utils import (
+    _asegurar_leible, 
+    _copiar_a_temp_corto, 
+    safe_join_file, 
+    crear_tmp_dir_adjuntos,
+)
 from core.shared.progress import _progress_init, _progress_set
 from core.shared.text_utils import _cell_text
     
@@ -149,7 +154,7 @@ def enviar_correos(
 
         registros = []
         cancelado = False
-       
+        tmp_adjuntos_dir = crear_tmp_dir_adjuntos()
 
         for i, (raw_nombre, raw_correo, raw_archivo) in enumerate(
             df[[col_nombre, col_correo, col_archivo]].itertuples(index=False, name=None), start=1
@@ -199,12 +204,10 @@ def enviar_correos(
 
                 _asegurar_leible(ruta_adj)
 
-                ruta_para_adjuntar = _copiar_a_temp_corto(
-                    ruta_adj
-                )  # evita rutas largas/locks
+                ruta_para_adjuntar = _copiar_a_temp_corto( ruta_adj, tmp_adjuntos_dir)  # evita rutas largas/locks
                 temp_adjuntos.append(ruta_para_adjuntar)
                 mail.Attachments.Add(ruta_para_adjuntar)
-
+                
                 # Footer con logo (si existe)
 
                 if logo_for_use and os.path.isfile(logo_for_use):
@@ -232,7 +235,10 @@ def enviar_correos(
                 time.sleep(delay_segundos)
 
             except Exception as e:
+                import traceback
                 estado = f"Error: {str(e)}"
+                print(f"[ERROR] Fila {i} - {correo} - {nombre_archivo}")
+                print(traceback.format_exc())
 
             registros.append(
                 {
@@ -431,5 +437,11 @@ def enviar_correos(
             if p and os.path.isfile(p):
                 try:
                     os.remove(p)
+                except OSError:
+                    pass
+                
+        if tmp_adjuntos_dir and os.path.isdir(tmp_adjuntos_dir):
+                try:
+                    shutil.rmtree(tmp_adjuntos_dir, ignore_errors = True)
                 except OSError:
                     pass
