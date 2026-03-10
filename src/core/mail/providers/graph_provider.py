@@ -42,9 +42,11 @@ class GraphProvider:
         subject: str,
         html_body: str,
         attachments_paths: list[str] | None = None,
+        inline_attachments: list[dict] | None = None,
         save_to_sent_items: bool = True,
     ) -> None:
         attachments = []
+        
         for p in attachments_paths or []:
             path = Path(p)
             if not path.is_file():
@@ -57,7 +59,20 @@ class GraphProvider:
                     "contentBytes": _to_b64(str(path)),
                 }
             )
-        
+        for a in inline_attachments or []:
+            p = Path(a["path"])
+            if not p.is_file():
+                raise FileNotFoundError(f"No existe inline adjunto: {p}")
+            attachments.append(
+                {
+                    "name":a.get("name",p.name),
+                    "contentType": a.get("contentType", _guess_content_type(str(p))),
+                    "contentBytes": _to_b64(str(p)),
+                    "isInline": True,
+                    "contentId": a["content_id"],
+                }
+            )
+            
         self.client.send_mail(
             to_recipients=[to],
             subject=subject,

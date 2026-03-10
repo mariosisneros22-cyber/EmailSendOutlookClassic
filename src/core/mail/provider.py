@@ -26,6 +26,7 @@ class MailProvider(Protocol):
         subject: str,
         html_body: str,
         attachments_paths: list[str] | None = None,
+        inline_attachments: list[dict] | None = None,
         save_to_sent_items: bool = True,
     ) -> None:
         ...

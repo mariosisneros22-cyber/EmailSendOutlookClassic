@@ -120,14 +120,17 @@ class GraphClient:
         recipients = [{"emailAddress": {"address": x}} for x in to_recipients if x]
         attachments = []
         for a in file_attachments or []:
-            attachments.append(
-                {
-                    "@odata.type": "#microsoft.graph.fileAttachment",
-                    "name": a["name"],
-                    "contentType": a.get("contentType", "application/octet-stream"),
-                    "contentBytes": a["contentBytes"],
-                }
-            )
+            item = {
+                "@odata.type": "#microsoft.graph.fileAttachment",
+                "name": a["name"],
+                "contentType": a.get("contentType", "application/octet-stream"),
+                "contentBytes": a["contentBytes"],
+            }
+            if "isInline" in a:
+                item["isInline"] = bool(a["isInline"])
+            if a.get("contentId"):
+                item["contentId"] = a["contentId"]
+            attachments.append(item)
         body = {
             "message": {
                 "subject": subject or "",

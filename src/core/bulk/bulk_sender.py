@@ -16,7 +16,8 @@ from core.shared.file_utils import (
 from core.shared.progress import _progress_init, _progress_set
 from core.shared.text_utils import _cell_text
     
-from core.outlook.outlook_client import get_outlook_app
+from core.graph.client import GraphClient
+from core.mail.providers.graph_provider import GraphProvider
 
 from reports.report_pdf import generar_pdfs_registro
 
@@ -89,6 +90,7 @@ def enviar_correos(
     report_title: str = "Registro de envío de correos",
     on_progress=None,
     show_summary_messagebox: bool = True,
+    mail_provider: GraphProvider | None = None,
 ):
     if not ruta_excel or not os.path.isfile(ruta_excel):
         raise FileNotFoundError("Selecciona un archivo Excel (.xlsx) válido.")
@@ -140,15 +142,13 @@ def enviar_correos(
     temp_adjuntos = []
 
     try:
+        provider = mail_provider or GraphProvider(GraphClient())
+        
         if logo_path and os.path.isfile(logo_path):
             fixed = _prepare_logo_fixed_height(os.path.abspath(logo_path), LOGO_H_PX)
             logo_for_use = fixed
             if os.path.abspath(fixed) != os.path.abspath(logo_path):
                 logo_tmp_to_cleanup = fixed
-
-        outlook = get_outlook_app()
-        if outlook is None:
-            raise RuntimeError("No se pudo acceder a Outlook.")
 
         _progress_init(progress, total)
 
@@ -185,10 +185,9 @@ def enviar_correos(
                     break
 
                 ruta_adj = safe_join_file(carpeta_archivos, nombre_archivo)
+                
 
-                mail = outlook.CreateItem(0)
-                mail.To = correo
-                mail.Subject = asunto
+                ###
 
                 # Texto -> HTML simple
                 body_txt = mensaje.replace("{nombre}", nombre)
@@ -206,32 +205,36 @@ def enviar_correos(
 
                 ruta_para_adjuntar = _copiar_a_temp_corto( ruta_adj, tmp_adjuntos_dir)  # evita rutas largas/locks
                 temp_adjuntos.append(ruta_para_adjuntar)
-                mail.Attachments.Add(ruta_para_adjuntar)
+                
+                inline_attachments = []
                 
                 # Footer con logo (si existe)
 
                 if logo_for_use and os.path.isfile(logo_for_use):
-                    cid = f"logo_footer_{i}"  # único por correo
-                    att = mail.Attachments.Add(os.path.abspath(logo_for_use))
-                    att.PropertyAccessor.SetProperty(
-                        "http://schemas.microsoft.com/mapi/proptag/0x3712001F", cid
-                    )
-
+                    logo_cid = "logo_footer"
                     body_html += (
                         "<br><br>"
-                        f"<img src='cid:{cid}' height='{LOGO_H_PX}' style='width:auto;display:block;border:0;'/>"
-                        "</body></html>"
+                        f"<img src='cid:{logo_cid}' height='{LOGO_H_PX}' style='width:auto;display:block;border:0;'/>"
                     )
-                else:
-                    body_html += "</body></html>"
-
-                mail.HTMLBody = body_html
-
-                if callable(is_cancelled) and is_cancelled():
-                    cancelado = True
-                    break
-
-                mail.Send()
+                    inline_attachments.append(
+                        {
+                            "path": os.path.abspath(logo_for_use),
+                            "content_id": logo_cid,
+                            "name": os.path.basename(logo_for_use),
+                        }
+                    )
+                
+                body_html += "</body></html>"
+                
+                provider.send_mail(
+                    to=correo,
+                    subject=asunto,
+                    html_body=body_html,
+                    attachments_paths=[ruta_para_adjuntar],
+                    inline_attachments=inline_attachments,
+                    save_to_sent_items=True
+                )
+    
                 time.sleep(delay_segundos)
 
             except Exception as e:
@@ -250,6 +253,7 @@ def enviar_correos(
                     "Estado": estado,
                 }
             )
+
 
             if callable(on_progress):
                 try:

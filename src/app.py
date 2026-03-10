@@ -2,8 +2,20 @@
 import customtkinter as ctk
 
 from ui.bulk_tab import mount as mount_bulk
+from ui.login_gate import mount as mount_login_gate
 from ui.responder_tab import mount as mount_responder
 from ui.theme import BTN_PRIMARY, BTN_SECONDARY, CARD_FG_COLOR
+
+
+def _mount_main_tabs(root):
+    tabs = ctk.CTkTabview(
+fg_color=CARD_FG_COLOR,
+        segmented_button_fg_color=BTN_SECONDARY["fg_color"],
+        segmented_button_selected_color=BTN_PRIMARY["fg_color"],
+        segmented_button_selected_hover_color=BTN_PRIMARY["hover_color"],
+        segmented_button_unselected_color=BTN_SECONDARY["fg_color"],
+        segmented_button_unselected_hover_color=BTN_SECONDARY["hover_color"],
+    )
 
 def main():
     ctk.set_appearance_mode("System")
